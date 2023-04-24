@@ -5,6 +5,7 @@
 #include <iostream>
 #include <chrono>
 #include <cassert>
+#include "cuda_profiler_api.h"
 
 
 const int Ni = 25088;
@@ -58,26 +59,23 @@ void mat_mult_gpu(int *input, int *weights, int *output)
 {    
     __shared__ int outputReduce[nThreads];
 
-    int rowsPerBlock = (Nn + gridDim.x - 1) / gridDim.x;
+    int rowsPerBlock = (Nn + nBlocks - 1) / nBlocks;
     int iStart = blockIdx.x*rowsPerBlock;
-    int jStart = threadIdx.x;
-    int jStride = blockDim.x;
+    int tid = threadIdx.x;
 
-    for(int i=iStart; i<iStart+rowsPerBlock && i<Nn; i++) { //4096/32=128
+    for(int i=iStart; i<iStart+rowsPerBlock && i<Nn; i++) {
         int sum = 0;
-        for(int j=jStart; j<Ni; j += jStride) { // 25088/32=784
+        for(int j=tid; j<Ni; j += nThreads)
             sum += weights[Ni*i + j]*input[j];
-        }
-        outputReduce[jStart] = sum;
+        outputReduce[tid] = sum;
 
-        // Reduction
+        // Reduction - deals with 
         // https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
         __syncthreads();
-        if(jStart == 0) {
+        if(tid == 0) {
             sum = 0;
-            for(int j=0; j<nThreads; j++) {
+            for(int j=0; j<nThreads; j++)
                 sum += outputReduce[j];
-            }
             output[i] = sum;
         }
     }
@@ -115,9 +113,6 @@ int main()
     cudaMemcpy(cuInput, input, Ni*sizeof(int), cudaMemcpyHostToDevice);
 
     // Naive GPU Implementation
-    // int blockSize = 256; // # threads/block, 
-    // int numBlocks = ( + blockSize - 1) / blockSize;
-    // int numBlocks = 4096;
     for(int i=0; i<nIters; i++) {
         // cudaMemset(cuOutput, 0, Nn*sizeof(int)); // only needed for the naive example
         auto time0 = std::chrono::steady_clock::now();
@@ -139,4 +134,10 @@ int main()
     free(output);
     free(input);
     free(weights);
+
+    // Cuda Error Checking
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) 
+        std::cout << "CUDA error: " << cudaGetErrorString(err) << std::endl;
+    cudaProfilerStop();
 }
