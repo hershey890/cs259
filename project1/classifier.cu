@@ -1,11 +1,17 @@
 /*
  * Compile with: nvcc classifier.cu -o classifier -std=c++11 -lcublas
- * Performance (already optimal)
- * -----------------------------
+ * Class 1 Performance (4096x25088)
+ * --------------------------------
  * Time(%)      Time     Calls       Avg       Min       Max  Name
  *   1.87%  3.3943ms         5  678.85us  672.35us  700.70us  mat_mult_gpu(float*, float*, float*)
  *   0.37%  673.63us         1  673.63us  673.63us  673.63us  void gemv2T_kernel_val<int, int, float, float, float, float, int=128, int=16, int=4, int=4, bool=0, bool=0, cublasGemvParam
  *
+ * Class 2 Performance (1024x4096)
+ * -------------------------------
+ * Time(%)      Time     Calls       Avg       Min       Max  Name
+ *   4.78%  406.94us         5  81.388us  75.647us  102.40us  mat_mult_gpu(float*, float*, float*)
+ *   0.46%  39.328us         1  39.328us  39.328us  39.328us  void gemv2T_kernel_val<int, int, float, float, float, float, int=128, int=16, int=4, int=4, bool=0, bool=0, cublasGemvParams<cublasGemvTensorStridedBat
+ * 
  * Resources
  * ---------
  * https://siboehm.com/articles/22/CUDA-MMM
@@ -21,11 +27,16 @@
 #include "cublas_v2.h"
 #include "../cuda_common.h"
 
+// #define CLASS1
+#ifdef CLASS1
+    const int Ni = 25088;
+    const int Nn = 4096;
+#else
+    const int Ni = 4096;
+    const int Nn = 1024;
+#endif
 
-const int Ni = 25088;
-const int Nn = 4096;
 const int nIters = 5; // # of times to average time calculation over
-
 const int nBlocks = 500; // Titan V has 640 cores and 80 SM
 const int nThreads = 1024; // divisible by 32, max 1024
 
