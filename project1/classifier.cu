@@ -1,4 +1,13 @@
 /*
+ * Compile with: nvcc classifier.cu -o classifier -std=c++11 -lcublas
+ * Performance (already optimal)
+ * -----------------------------
+ * Time(%)      Time     Calls       Avg       Min       Max  Name
+ *   1.87%  3.3943ms         5  678.85us  672.35us  700.70us  mat_mult_gpu(float*, float*, float*)
+ *   0.37%  673.63us         1  673.63us  673.63us  673.63us  void gemv2T_kernel_val<int, int, float, float, float, float, int=128, int=16, int=4, int=4, bool=0, bool=0, cublasGemvParam
+ *
+ * Resources
+ * ---------
  * https://siboehm.com/articles/22/CUDA-MMM
  * https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html
  */
@@ -21,6 +30,8 @@ const int nBlocks = 500; // Titan V has 640 cores and 80 SM
 const int nThreads = 1024; // divisible by 32, max 1024
 
 
+/* https://leimao.github.io/blog/Proper-CUDA-Error-Checking/
+ */
 #define CHECK_CUDA_ERROR(val) check((val), #val, __FILE__, __LINE__)
 template <typename T>
 void check(T err, const char* const func, const char* const file,
@@ -37,6 +48,8 @@ void check(T err, const char* const func, const char* const file,
 }
 
 
+/* https://stackoverflow.com/questions/13041399/equivalent-of-cudageterrorstring-for-cublas
+ */
 #define CHECK_CUBLAS_ERROR(val) check_cublas((val), #val, __FILE__, __LINE__)
 template <typename T>
 void check_cublas(T err, const char* const func, const char* const file,
@@ -54,7 +67,7 @@ void check_cublas(T err, const char* const func, const char* const file,
             case CUBLAS_STATUS_MAPPING_ERROR: errorStr = "CUBLAS_STATUS_MAPPING_ERROR";
             case CUBLAS_STATUS_EXECUTION_FAILED: errorStr = "CUBLAS_STATUS_EXECUTION_FAILED"; 
             case CUBLAS_STATUS_INTERNAL_ERROR: errorStr = "CUBLAS_STATUS_INTERNAL_ERROR"; 
-            default: errorStr = "unknown error";
+            // default: errorStr = "unknown error";
         }
         std::cerr << "CUBLAS Runtime Error at: " << file << ":" << line
                 << std::endl;
@@ -77,19 +90,6 @@ void checkLast(const char* const file, const int line)
         // std::exit(EXIT_FAILURE);
     }
     err = cudaGetLastError(); // done twice intenstinoally
-    if (err != cudaSuccess)
-    {
-        std::cerr << "CUDA Runtime Error at: " << file << ":" << line
-                  << std::endl;
-        std::cerr << cudaGetErrorString(err) << std::endl;
-    }
-}
-
-
-#define CHECK_LAST_CUBLAS_ERROR() check_last_cublas(__FILE__, __LINE__)
-void check_last_cublas(const char* const file, const int line)
-{
-    cudaError_t err{cudaGetLastError()};
     if (err != cudaSuccess)
     {
         std::cerr << "CUDA Runtime Error at: " << file << ":" << line
@@ -198,7 +198,7 @@ int main()
     cudaMemcpy(cuWeights, weights, Ni*Nn*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(cuInput, input, Ni*sizeof(float), cudaMemcpyHostToDevice);
 
-    // Naive GPU Implementation
+    // GPU Implementation
     for(int i=0; i<nIters; i++) {
         // cudaMemset(cuOutput, 0, Nn*sizeof(int)); // only needed for the naive example
         auto time0 = std::chrono::steady_clock::now();
@@ -213,12 +213,13 @@ int main()
     std::cout << "Naive GPU Time: " << elapsedTime/nIters << std::endl;
     assert(is_gpu_cpu_arr_equal(output, validationOutput, Nn));
 
+    /* CUBLAS Benchmark
+     * Compares our kernel vs. CUBLAS performance
+     * https://github.com/deeperlearning/professional-cuda-c-programming/blob/master/solutions/chapter08/cublas-matrix-matrix-async.cu
+     */
     // Create the cuBLAS handle
     cublasHandle_t handle = 0;
-    cudaStream_t stream = 0;
     cublasCreate(&handle);
-    cudaStreamCreate(&stream);
-    cublasSetStream(handle, stream);
 
     // // Allocate device memory
     float *cublasInput, *cublasMatrix, *cublasOutput, *y;
@@ -228,41 +229,20 @@ int main()
     cudaMalloc(&y, 1*sizeof(float));
 
     // // Transfer inputs to the device
-    // cublasSetMatrixAsync(Nn, Ni, sizeof(float), weights, Nn, cublasMatrix, Nn, stream);
-    // cublasSetVector(Ni, sizeof(float), input, Ni, cublasInput, Ni);
+    cublasSetMatrix(Nn, Ni, sizeof(float), weights, Nn, cublasMatrix, Nn);
+    cublasSetVector(Ni, sizeof(float), input, Ni, cublasInput, Ni);
 
     // Execute Matrix Vector-Multiplication
     const float alpha = 1.0f;
     const float beta = 0;
-    // cudaProfilerStart();
-    CHECK_CUBLAS_ERROR(cublasSgemv(handle, CUBLAS_OP_T, Ni, Nn, &alpha, cublasMatrix, Ni, cublasInput, 1, &beta, y, 1));
-    // cudaDeviceSynchronize();
-    // cudaDeviceReset();
-
-    // cudaProfilerStop();
-    // // // CHECK_CUBLAS(cublasSetMatrixAsync(M, N, sizeof(float), A, M, dA, M,
-    // // //             stream));
-    // // // CHECK_CUBLAS(cublasSetMatrixAsync(N, M, sizeof(float), B, N, dB, N,
-    // // //             stream));
-    // // // CHECK_CUBLAS(cublasSetMatrixAsync(M, M, sizeof(float), C, M, dC, M,
-    // // //             stream));
-
-    // // // // Execute the matrix-vector multiplication
-    // // // CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, M, M, N, &alpha,
-    // // //             dA, M, dB, N, &beta, dC, M));
-
-    // // // // Retrieve the output vector from the device
-    // // // CHECK_CUBLAS(cublasGetMatrixAsync(M, M, sizeof(float), dC, M, C, M,
-    // // //             stream));
-    cudaStreamSynchronize(stream);
-
-    cudaFree(cublasOutput);
-    cudaFree(cublasMatrix);
-    cudaFree(cublasInput);
-    cudaStreamDestroy(stream);
+    CHECK_CUBLAS_ERROR(cublasSgemv(handle, CUBLAS_OP_T, Ni, Nn, &alpha, cublasMatrix, Ni, cublasInput, 1, &beta, cublasOutput, 1));
+    CHECK_CUBLAS_ERROR(cublasGetVector(Nn, sizeof(float), cublasOutput, 1, validationOutput, 1));
     cublasDestroy(handle);
     
     // Free Memory
+    cudaFree(cublasOutput);
+    cudaFree(cublasMatrix);
+    cudaFree(cublasInput);
     cudaFree(cuOutput);
     cudaFree(cuInput);
     cudaFree(cuWeights);
