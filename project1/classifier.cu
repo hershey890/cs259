@@ -15,11 +15,11 @@
 #include <iostream>
 #include <chrono>
 #include <cassert>
-#include <typeinfo>
 #include "cuda_profiler_api.h"
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include "cublas_v2.h"
+#include "../cuda_common.h"
 
 
 const int Ni = 25088;
@@ -30,73 +30,6 @@ const int nBlocks = 500; // Titan V has 640 cores and 80 SM
 const int nThreads = 1024; // divisible by 32, max 1024
 
 
-/* https://leimao.github.io/blog/Proper-CUDA-Error-Checking/
- */
-#define CHECK_CUDA_ERROR(val) check((val), #val, __FILE__, __LINE__)
-template <typename T>
-void check(T err, const char* const func, const char* const file,
-           const int line)
-{
-    if (err != cudaSuccess)
-    {
-        std::cerr << "CUDA Runtime Error at: " << file << ":" << line
-                << std::endl;
-        std::cerr << cudaGetErrorString(err) << " " << func << std::endl;
-        // We don't exit when we encounter CUDA errors in this example.
-        // std::exit(EXIT_FAILURE);
-    }
-}
-
-
-/* https://stackoverflow.com/questions/13041399/equivalent-of-cudageterrorstring-for-cublas
- */
-#define CHECK_CUBLAS_ERROR(val) check_cublas((val), #val, __FILE__, __LINE__)
-template <typename T>
-void check_cublas(T err, const char* const func, const char* const file,
-                  const int line)
-{
-    if (err != CUBLAS_STATUS_SUCCESS) {
-        std::string errorStr;
-        switch(err)
-        {
-            case CUBLAS_STATUS_SUCCESS: errorStr = "CUBLAS_STATUS_SUCCESS";
-            case CUBLAS_STATUS_NOT_INITIALIZED: errorStr = "CUBLAS_STATUS_NOT_INITIALIZED";
-            case CUBLAS_STATUS_ALLOC_FAILED: errorStr = "CUBLAS_STATUS_ALLOC_FAILED";
-            case CUBLAS_STATUS_INVALID_VALUE: errorStr = "CUBLAS_STATUS_INVALID_VALUE"; 
-            case CUBLAS_STATUS_ARCH_MISMATCH: errorStr = "CUBLAS_STATUS_ARCH_MISMATCH"; 
-            case CUBLAS_STATUS_MAPPING_ERROR: errorStr = "CUBLAS_STATUS_MAPPING_ERROR";
-            case CUBLAS_STATUS_EXECUTION_FAILED: errorStr = "CUBLAS_STATUS_EXECUTION_FAILED"; 
-            case CUBLAS_STATUS_INTERNAL_ERROR: errorStr = "CUBLAS_STATUS_INTERNAL_ERROR"; 
-            // default: errorStr = "unknown error";
-        }
-        std::cerr << "CUBLAS Runtime Error at: " << file << ":" << line
-                << std::endl;
-        std::cerr << errorStr << " " << func << std::endl;
-
-    }
-}
-
-
-#define CHECK_LAST_CUDA_ERROR() checkLast(__FILE__, __LINE__)
-void checkLast(const char* const file, const int line)
-{
-    cudaError_t err{cudaGetLastError()};
-    if (err != cudaSuccess)
-    {
-        std::cerr << "CUDA Runtime Error at: " << file << ":" << line
-                  << std::endl;
-        std::cerr << cudaGetErrorString(err) << std::endl;
-        // We don't exit when we encounter CUDA errors in this example.
-        // std::exit(EXIT_FAILURE);
-    }
-    err = cudaGetLastError(); // done twice intenstinoally
-    if (err != cudaSuccess)
-    {
-        std::cerr << "CUDA Runtime Error at: " << file << ":" << line
-                  << std::endl;
-        std::cerr << cudaGetErrorString(err) << std::endl;
-    }
-}
 
 
 bool is_gpu_cpu_arr_equal(float *output, float *cuOutput, float outputLen) {
@@ -188,7 +121,7 @@ int main()
         std::chrono::duration<double> elapsedSeconds = time1 - time0;
         elapsedTime += elapsedSeconds.count();
     }
-    std::cout << "CPU Time:       " << elapsedTime/nIters << std::endl;
+    std::cout << "CPU Time: " << elapsedTime/nIters << std::endl;
 
     // // GPU Setup
     float *cuWeights, *cuInput, *cuOutput;
@@ -210,7 +143,7 @@ int main()
     }
     float *validationOutput = (float*)malloc(Nn*sizeof(float));
     cudaMemcpy(validationOutput, cuOutput, Nn*sizeof(float), cudaMemcpyDeviceToHost);
-    std::cout << "Naive GPU Time: " << elapsedTime/nIters << std::endl;
+    std::cout << "GPU Time: " << elapsedTime/nIters << std::endl;
     assert(is_gpu_cpu_arr_equal(output, validationOutput, Nn));
 
     /* CUBLAS Benchmark
