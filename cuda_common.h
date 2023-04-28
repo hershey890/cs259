@@ -1,6 +1,8 @@
+#include <fstream>
 #include <iostream>
 #include <cuda_runtime.h>
 #include <cuda.h>
+#include <cudnn.h>
 #include "cublas_v2.h"
 
 
@@ -24,7 +26,7 @@ void check(T err, const char* const func, const char* const file,
 
 /* https://stackoverflow.com/questions/13041399/equivalent-of-cudageterrorstring-for-cublas
  */
-#define CHECK_CUBLAS_ERROR(val) check_cublas((val), #val, __FILE__, __LINE__)
+#define CHECK_CUBLAS(val) check_cublas((val), #val, __FILE__, __LINE__)
 template <typename T>
 void check_cublas(T err, const char* const func, const char* const file,
                   const int line)
@@ -70,4 +72,34 @@ void checkLast(const char* const file, const int line)
                   << std::endl;
         std::cerr << cudaGetErrorString(err) << std::endl;
     }
+}
+
+
+#define CHECK_CUDNN checkCUDNN(__FILE__, __LINE__)
+template <typename T>
+void checkCUDNN(T err, const char* const file, const int line)
+{
+    cudnnStatus_t status(err);
+    if(err != CUDNN_STATUS_SUCCESS) {
+        std::cerr << "CUDNN Runtime Error at: " << file << ":" << line << std::endl;
+        std::cerr << cudnnGetErrorString(err) << std::endl;
+    }
+}
+
+
+/* Writes an array to a .txt file
+ * Each value is on a new line with no comma
+ * Previous comments of file are discarded
+ * @param arr: array to write to file
+ * @param size: size of array
+ * @param filename: name of file to write to
+ * @return: void
+ */
+template <typename T>
+void arrayToFile(T *arr, int size, std::string filename)
+{
+    std::ofstream f(filename, std::ofstream::trunc);
+    for (int i = 0; i < size; i++)
+        f << arr[i] << "\n";
+    f.close();
 }

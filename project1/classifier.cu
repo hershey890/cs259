@@ -27,6 +27,7 @@
 #include "cublas_v2.h"
 #include "../cuda_common.h"
 
+
 // #define CLASS1
 #ifdef CLASS1
     const int Ni = 25088;
@@ -36,11 +37,10 @@
     const int Nn = 1024;
 #endif
 
+
 const int nIters = 5; // # of times to average time calculation over
 const int nBlocks = 500; // Titan V has 640 cores and 80 SM
 const int nThreads = 1024; // divisible by 32, max 1024
-
-
 
 
 bool is_gpu_cpu_arr_equal(float *output, float *cuOutput, float outputLen) {
@@ -87,7 +87,7 @@ void mat_mult_gpu_naive(int *input, int *weights, int *output)
 __global__
 void mat_mult_gpu(float *input, float *weights, float *output)
 {    
-    __shared__ int outputReduce[nThreads];
+    __shared__ float outputReduce[nThreads];
 
     int rowsPerBlock = (Nn + nBlocks - 1) / nBlocks;
     int iStart = blockIdx.x*rowsPerBlock;
@@ -119,11 +119,12 @@ int main()
     float *input   = (float*)malloc(Ni*sizeof(float));
     float *output  = (float*)malloc(Nn*sizeof(float));
     for(int i=0; i<Ni*Nn; i++)
-        weights[i] = rand() % 10;
+        weights[i] = (float)rand() / (float)RAND_MAX;
     for(int i=0; i<Ni; i++)
-        input[i] = rand() % 10;
+        input[i] = (float)rand() / (float)RAND_MAX;
 
-    // // Naive CPU Implementation
+
+    // Naive CPU Implementation
     double elapsedTime = 0;
     for(int i=0; i<nIters; i++) {
         auto time0 = std::chrono::steady_clock::now();
@@ -134,7 +135,8 @@ int main()
     }
     std::cout << "CPU Time: " << elapsedTime/nIters << std::endl;
 
-    // // GPU Setup
+
+    // GPU Setup
     float *cuWeights, *cuInput, *cuOutput;
     cudaMalloc(&cuWeights, Ni*Nn*sizeof(float));
     cudaMalloc(&cuInput,   Ni*sizeof(float));
@@ -144,7 +146,6 @@ int main()
 
     // GPU Implementation
     for(int i=0; i<nIters; i++) {
-        // cudaMemset(cuOutput, 0, Nn*sizeof(int)); // only needed for the naive example
         auto time0 = std::chrono::steady_clock::now();
         mat_mult_gpu<<<nBlocks, nThreads>>>(cuInput, cuWeights, cuOutput);
         cudaDeviceSynchronize();
@@ -156,6 +157,12 @@ int main()
     cudaMemcpy(validationOutput, cuOutput, Nn*sizeof(float), cudaMemcpyDeviceToHost);
     std::cout << "GPU Time: " << elapsedTime/nIters << std::endl;
     assert(is_gpu_cpu_arr_equal(output, validationOutput, Nn));
+
+    // Free Memory
+    cudaFree(cuOutput);
+    cudaFree(cuInput);
+    cudaFree(cuWeights);
+
 
     /* CUBLAS Benchmark
      * Compares our kernel vs. CUBLAS performance
@@ -179,24 +186,20 @@ int main()
     // Execute Matrix Vector-Multiplication
     const float alpha = 1.0f;
     const float beta = 0;
-    CHECK_CUBLAS_ERROR(cublasSgemv(handle, CUBLAS_OP_T, Ni, Nn, &alpha, cublasMatrix, Ni, cublasInput, 1, &beta, cublasOutput, 1));
-    CHECK_CUBLAS_ERROR(cublasGetVector(Nn, sizeof(float), cublasOutput, 1, validationOutput, 1));
+    CHECK_CUBLAS(cublasSgemv(handle, CUBLAS_OP_T, Ni, Nn, &alpha, cublasMatrix, Ni, cublasInput, 1, &beta, cublasOutput, 1));
+    CHECK_CUBLAS(cublasGetVector(Nn, sizeof(float), cublasOutput, 1, validationOutput, 1));
     cublasDestroy(handle);
     
     // Free Memory
     cudaFree(cublasOutput);
     cudaFree(cublasMatrix);
     cudaFree(cublasInput);
-    cudaFree(cuOutput);
-    cudaFree(cuInput);
-    cudaFree(cuWeights);
     free(output);
     free(input);
     free(weights);
-    cudaDeviceReset();
-    
-    // Cuda Error Checking
+
     CHECK_LAST_CUDA_ERROR();
+    cudaDeviceReset();
 
     return 0;
 }
