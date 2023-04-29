@@ -48,7 +48,7 @@ void convolution_layer_base(VTYPE (&synapse)[CONV1_Ky][CONV1_Kx][CONV1_Nn][CONV1
                               VTYPE (&neuron_i)[CONV1_NYPAD][CONV1_NXPAD][CONV1_Ni],
                               VTYPE (&neuron_n)[CONV1_NYSCL][CONV1_NXSCL][CONV1_Nn]) {
     for (int ny = 0; ny + CONV1_Ky < CONV1_Ny; ny += CONV1_Sy) {
-        for (int nx = 0; nx CONV1_Kx < CONV1_Nx; nx += CONV1_Sx) {
+        for (int nx = 0; nx + CONV1_Kx < CONV1_Nx; nx += CONV1_Sx) {
             for (int ky = 0; ky < CONV1_Ky; ky++) {
                 for (int kx = 0; kx < CONV1_Kx; kx++) {
                     for (int ni = 0; ni < Ni; ni++) {
@@ -71,7 +71,7 @@ __global__ void convolution_layer_base_gpu(VTYPE (&synapse)[CONV1_Ky][CONV1_Kx][
     const int start_row = x * CONV1_ROWS_PROCESSED;
     const int end_row = min(CONV1_NYSCL, start_row + CONV1_ROWS_PROCESSED);
     for (int ny = start_row; ny < end_row; ny += CONV1_Sy) {
-        for (int nx = 0; nx CONV1_Kx < CONV1_Nx; nx += CONV1_Sx) {
+        for (int nx = 0; nx + CONV1_Kx < CONV1_Nx; nx += CONV1_Sx) {
             for (int ky = 0; ky < CONV1_Ky; ky++) {
                 for (int kx = 0; kx < CONV1_Kx; kx++) {
                     for (int ni = 0; ni < Ni; ni++) {
@@ -94,19 +94,19 @@ __global__ void convolution_layer_tiled_gpu(VTYPE (&synapse_2)[CONV1_Ni][CONV1_N
     const int start_row = x * CONV1_ROWS_PROCESSED;
     const int end_row = min(CONV1_NYSCL, start_row + CONV1_ROWS_PROCESSED);
     for (int ny = start_row; ny < end_row; ny += CONV1_Sy) {
-        for (int nx = 0; nx CONV1_Kx < CONV1_Nx; nx += CONV1_Sx) {
+        for (int nx = 0; nx + CONV1_Kx < CONV1_Nx; nx += CONV1_Sx) {
             for (int ni = 0; ni < Ni; ni++) {
                 for (int nn = 0; nn < Nn; nn++) {
                     neuron_n[ny][nx][nn] = (
-                          neuron_i[ni][ny+0][nx+0] * synapse[ni][nn][0][0]
-                        + neuron_i[ni][ny+0][nx+1] * synapse[ni][nn][0][1]
-                        + neuron_i[ni][ny+0][nx+2] * synapse[ni][nn][0][2]
-                        + neuron_i[ni][ny+1][nx+0] * synapse[ni][nn][1][0]
-                        + neuron_i[ni][ny+1][nx+1] * synapse[ni][nn][1][1]
-                        + neuron_i[ni][ny+1][nx+2] * synapse[ni][nn][1][2]
-                        + neuron_i[ni][ny+2][nx+0] * synapse[ni][nn][2][0]
-                        + neuron_i[ni][ny+2][nx+1] * synapse[ni][nn][2][1]
-                        + neuron_i[ni][ny+2][nx+2] * synapse[ni][nn][2][2]
+                            neuron_i_2[ni][ny+0][nx+0] * synapse_2[ni][nn][0][0]
+                            + neuron_i_2[ni][ny+0][nx+1] * synapse_2[ni][nn][0][1]
+                            + neuron_i_2[ni][ny+0][nx+2] * synapse_2[ni][nn][0][2]
+                            + neuron_i_2[ni][ny+1][nx+0] * synapse_2[ni][nn][1][0]
+                            + neuron_i_2[ni][ny+1][nx+1] * synapse_2[ni][nn][1][1]
+                            + neuron_i_2[ni][ny+1][nx+2] * synapse_2[ni][nn][1][2]
+                            + neuron_i_2[ni][ny+2][nx+0] * synapse_2[ni][nn][2][0]
+                            + neuron_i_2[ni][ny+2][nx+1] * synapse_2[ni][nn][2][1]
+                            + neuron_i_2[ni][ny+2][nx+2] * synapse_2[ni][nn][2][2]
                     );
                 }
             }
