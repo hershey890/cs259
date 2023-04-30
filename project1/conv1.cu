@@ -113,8 +113,21 @@ __global__ void convolution_layer_tiled_gpu(VTYPE *synapse_2, VTYPE *neuron_i_2,
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
+    VTYPE sum = 0;
+    // neuron_n[NEUR_OUT_ADDR(x, y, z)] = 0;
 
-    
+    for (int ni = 0; ni < CONV1_Ni; ni++) {
+        //  neuron_n[NEUR_OUT_ADDR(x, y, z)] += 
+        sum +=           neuron_i_2[NEUR_IN_ADDR(ni, y+0, x+0)] * synapse_2[SYNAPSE_ADDR(ni, z, 0, 0)]
+                        + neuron_i_2[NEUR_IN_ADDR(ni, y+0, x+1)] * synapse_2[SYNAPSE_ADDR(ni, z, 0, 1)]
+                        + neuron_i_2[NEUR_IN_ADDR(ni, y+0, x+2)] * synapse_2[SYNAPSE_ADDR(ni, z, 0, 2)]
+                        + neuron_i_2[NEUR_IN_ADDR(ni, y+1, x+0)] * synapse_2[SYNAPSE_ADDR(ni, z, 1, 0)]
+                        + neuron_i_2[NEUR_IN_ADDR(ni, y+1, x+1)] * synapse_2[SYNAPSE_ADDR(ni, z, 1, 1)]
+                        + neuron_i_2[NEUR_IN_ADDR(ni, y+1, x+2)] * synapse_2[SYNAPSE_ADDR(ni, z, 1, 2)]
+                        + neuron_i_2[NEUR_IN_ADDR(ni, y+2, x+0)] * synapse_2[SYNAPSE_ADDR(ni, z, 2, 0)]
+                        + neuron_i_2[NEUR_IN_ADDR(ni, y+2, x+1)] * synapse_2[SYNAPSE_ADDR(ni, z, 2, 1)]
+                        + neuron_i_2[NEUR_IN_ADDR(ni, y+2, x+2)] * synapse_2[SYNAPSE_ADDR(ni, z, 2, 2)];
+
     // int x = blockIdx.x * blockDim.x + threadIdx.x;
 
     // const int start_row = x * CONV1_ROWS_PROCESSED;
@@ -149,6 +162,8 @@ __global__ void convolution_layer_tiled_gpu(VTYPE *synapse_2, VTYPE *neuron_i_2,
     //         }
     //     }
     // }
+    }
+    neuron_n[NEUR_OUT_ADDR(x, y, z)] = sum;
 }
 
 int main(const int argc, const char** argv) {
@@ -162,8 +177,11 @@ int main(const int argc, const char** argv) {
     // neuron_i_2  = (VTYPE (*)[CONV1_Ni][CONV1_NYPAD][CONV1_NXPAD])malloc(CONV1_NYPAD*CONV1_NXPAD*CONV1_Ni*sizeof(VTYPE));
     // neuron_n  = (VTYPE (*)[CONV1_NYSCL][CONV1_NXSCL][CONV1_Nn])malloc(CONV1_NYSCL*CONV1_NXSCL*CONV1_Nn*sizeof(VTYPE));
     // neuron_n2 = (VTYPE (*)[CONV1_NYSCL][CONV1_NXSCL][CONV1_Nn])aligned_malloc(64,CONV1_NYSCL*CONV1_NXSCL*CONV1_Nn*sizeof(VTYPE));
-    dim3 gridDim(CONV1_NXSCL, CONV1_NYSCL, CONV1_Nn);
-    dim3 blockDim(16, 8, 8);
+    const int X_DIM = 32;
+    const int Y_DIM = 8;
+    const int Z_DIM = 4;
+    dim3 gridDim(CONV1_NXSCL/X_DIM, CONV1_NYSCL/Y_DIM, CONV1_Nn/Z_DIM);
+    dim3 blockDim(X_DIM, Y_DIM, Z_DIM);
 
     float *cuInput, *cuKernels, *cuOutput;
     CHECK_CUDA_ERROR(cudaMalloc(&cuInput, CONV1_NEURON_INPUT_SIZE*sizeof(VTYPE)));
