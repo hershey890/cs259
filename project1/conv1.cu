@@ -12,42 +12,50 @@
 
 using namespace std;
 
-#define CONV1_Ny 224
-#define CONV1_Nx 224
-#define CONV1_Ky 3
-#define CONV1_Kx 3
-#define CONV1_Ni 64
-#define CONV1_Nn 64
 
-#define CONV1_Sy 1
-#define CONV1_Sx 1
+#ifdef CONV
+  #define CONV_Ny 224
+  #define CONV_Nx 224
+  #define CONV_Ni 64
+  #define CONV_Nn 64
+#else
+  #define CONV_Ny 14
+  #define CONV_Nx 14
+  #define CONV_Ni 512
+  #define CONV_Nn 512
+#endif
+
+#define CONV_Ky 3
+#define CONV_Kx 3
+#define CONV_Sy 1
+#define CONV_Sx 1
 
 //Tiling Sizes
-#define CONV1_Tnn 32
-#define CONV1_Tn  16
-#define CONV1_Ti  16
+#define CONV_Tnn 32
+#define CONV_Tn  16
+#define CONV_Ti  16
 
-#define CONV1_Ty  8
-#define CONV1_Tx  8
+#define CONV_Ty  8
+#define CONV_Tx  8
 
-#define CONV1_NYPAD (CONV1_Ny) // #define CONV1_NYPAD (CONV1_Ny+CONV1_Ky)
-#define CONV1_NXPAD (CONV1_Nx) // #define CONV1_NXPAD (CONV1_Nx+CONV1_Kx)
+#define CONV_NYPAD (CONV_Ny) // #define CONV_NYPAD (CONV_Ny+CONV_Ky)
+#define CONV_NXPAD (CONV_Nx) // #define CONV_NXPAD (CONV_Nx+CONV_Kx)
 
-#define CONV1_NYSCL (CONV1_Ny - CONV1_Ky + 1) // #define CONV1_NYSCL (CONV1_Ny/CONV1_Sy)
-#define CONV1_NXSCL (CONV1_Nx - CONV1_Kx + 1) // #define CONV1_NXSCL (CONV1_Nx/CONV1_Sx)
+#define CONV_NYSCL ((CONV_Ny - CONV_Ky + 1)/CONV_Sy) // #define CONV_NYSCL (CONV_Ny/CONV_Sy)
+#define CONV_NXSCL ((CONV_Nx - CONV_Kx + 1)/CONV_Sx) // #define CONV_NXSCL (CONV_Nx/CONV_Sx)
                                                                                                                                    
-#define CONV1_SYNAPSE_SIZE (CONV1_Ky*CONV1_Kx*CONV1_Nn*CONV1_Ni)
-#define CONV1_NEURON_INPUT_SIZE (CONV1_NYPAD*CONV1_NXPAD*CONV1_Ni)
-#define CONV1_NEURON_OUTPUT_SIZE (CONV1_NYSCL*CONV1_NXSCL*CONV1_Nn)
+#define CONV_FILTER_SIZE (CONV_Ky*CONV_Kx*CONV_Nn*CONV_Ni)
+#define CONV_INPUT_SIZE (CONV_NYPAD*CONV_NXPAD*CONV_Ni)
+#define CONV_OUTPUT_SIZE (CONV_NYSCL*CONV_NXSCL*CONV_Nn)
 
-#define CONV1_THREADS 1024
-#define CONV1_BLOCKS 500
+#define CONV_THREADS 1024
+#define CONV_BLOCKS 500
 
 using VTYPE = float;
 
-#define NEUR_OUT_ADDR(ny, nx, nn) (CONV1_Nx*CONV1_Nn*(ny) + CONV1_Nn*(nx) + (nn))
-#define NEUR_IN_ADDR(ni, ny, nx) (CONV1_Ny*CONV1_Nx*(ni) + CONV1_Nx*(ny) + (nx))
-#define SYNAPSE_ADDR(ni, nn, ky, kx) (CONV1_Nn * CONV1_Ky*CONV1_Kx*(ni) + CONV1_Ky*CONV1_Kx*(nn) + CONV1_Kx*(ky) + (kx))
+#define OUTPUT_ADDR(ny, nx, nn) (CONV_Nx*CONV_Nn*(ny) + CONV_Nn*(nx) + (nn))
+#define INPUT_ADDR(ni, ny, nx) (CONV_Ny*CONV_Nx*(ni) + CONV_Nx*(ny) + (nx))
+#define KERNEL_ADDR(ni, nn, ky, kx) (CONV_Nn * CONV_Ky*CONV_Kx*(ni) + CONV_Ky*CONV_Kx*(nn) + CONV_Kx*(ky) + (kx))
 
 bool is_gpu_cpu_arr_equal(VTYPE *output, VTYPE *cuOutput, int outputLen) {
     for(int i=0; i<outputLen; i++) {
@@ -60,31 +68,49 @@ bool is_gpu_cpu_arr_equal(VTYPE *output, VTYPE *cuOutput, int outputLen) {
     return true;
 }
 
+// Base CPU Version (no optimizations)
+void convolution_layer_base(VTYPE *kernel, VTYPE *input, VTYPE *output) {
+    for (int ny = 0; ny + CONV_Ky < CONV_Ny; ny += CONV_Sy) {
+        for (int nx = 0; nx + CONV_Kx < CONV_Nx; nx += CONV_Sx) {
+            for (int ky = 0; ky < CONV_Ky; ky++) {
+                for (int kx = 0; kx < CONV_Kx; kx++) {
+                    for (int ni = 0; ni < CONV_Ni; ni++) {
+                        for (int nn = 0; nn < CONV_Nn; nn++) {
+                          // Assumes output has already been pre-zero'd out.
+                          output[OUTPUT_ADDR(ny, nx, nn)] += input[INPUT_ADDR(ni, ny + ky, nx + kx)] * kernel[KERNEL_ADDR(ni, nn, ky, kx)];
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Conv Layer DianNao implementation.
-void  convolution_layer(VTYPE *synapse_2, VTYPE *neuron_i_2, VTYPE *neuron_n) {
-  VTYPE sum[CONV1_Nn]={0};
+void convolution_layer(VTYPE *kernel, VTYPE *input, VTYPE *output) {
+  VTYPE sum[CONV_Nn]={0};
 
   // — Original code — (excluding nn, ii loops)
   int yout = 0;
-  for (int y = 0; y + CONV1_Ky < CONV1_Ny; y += CONV1_Sy) { // tiling for y;
+  for (int y = 0; y + CONV_Ky < CONV_Ny; y += CONV_Sy) { // tiling for y;
     int xout = 0;
-    for (int x = 0; x + CONV1_Kx < CONV1_Nx; x += CONV1_Sx) { // tiling for x;
-      for (int nn = 0; nn < CONV1_Nn; nn += CONV1_Tn) {
-        for (int n = nn; n < nn + CONV1_Tn; n++) {
+    for (int x = 0; x + CONV_Kx < CONV_Nx; x += CONV_Sx) { // tiling for x;
+      for (int nn = 0; nn < CONV_Nn; nn += CONV_Tn) {
+        for (int n = nn; n < nn + CONV_Tn; n++) {
           sum[n]=0;
         }
 
         // sliding window;
-        for (int ky = 0; ky < CONV1_Ky; ky++)
-          for (int kx = 0; kx < CONV1_Kx; kx++)
-            for (int n = nn; n < nn + CONV1_Tn; n++)
-              for (int i = 0; i < CONV1_Ni; i++) {
-                VTYPE sv = synapse_2[SYNAPSE_ADDR(i, n, ky, kx)]; // VTYPE sv = synapse[ky][kx][n][i];
-                VTYPE nv = neuron_i_2[NEUR_IN_ADDR(i, ky + y, kx + x)]; // neuron_i[ky + y][kx + x][i];
+        for (int ky = 0; ky < CONV_Ky; ky++)
+          for (int kx = 0; kx < CONV_Kx; kx++)
+            for (int n = nn; n < nn + CONV_Tn; n++)
+              for (int i = 0; i < CONV_Ni; i++) {
+                VTYPE sv = kernel[KERNEL_ADDR(i, n, ky, kx)]; // VTYPE sv = synapse[ky][kx][n][i];
+                VTYPE nv = input[INPUT_ADDR(i, ky + y, kx + x)]; // neuron_i[ky + y][kx + x][i];
                 sum[n]+=sv*nv;
               }
-        for (int n = nn; n < nn + CONV1_Tn; n++) {
-            neuron_n[NEUR_OUT_ADDR(yout, xout, n)] = sum[n]; //   neuron_n[yout][xout][n] = sum[n];
+        for (int n = nn; n < nn + CONV_Tn; n++) {
+            output[OUTPUT_ADDR(yout, xout, n)] = sum[n]; //   output[yout][xout][n] = sum[n];
         }
       }
       xout++; 
@@ -93,7 +119,29 @@ void  convolution_layer(VTYPE *synapse_2, VTYPE *neuron_i_2, VTYPE *neuron_n) {
   }
 }
 
-__global__ void convolution_layer_tiled_gpu(VTYPE *synapse_2, VTYPE *neuron_i_2, VTYPE *neuron_n) {
+__global__ void convolution_layer_parallelized_gpu(VTYPE *synapse_2, VTYPE *neuron_i_2, VTYPE *neuron_n) {
+
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int z = blockIdx.z * blockDim.z + threadIdx.z;
+    VTYPE sum = 0;
+
+    for (int ni = 0; ni < CONV_Ni; ni++) {
+        sum +=           neuron_i_2[INPUT_ADDR(ni, y+0, x+0)] * synapse_2[KERNEL_ADDR(ni, z, 0, 0)]
+                        + neuron_i_2[INPUT_ADDR(ni, y+0, x+1)] * synapse_2[KERNEL_ADDR(ni, z, 0, 1)]
+                        + neuron_i_2[INPUT_ADDR(ni, y+0, x+2)] * synapse_2[KERNEL_ADDR(ni, z, 0, 2)]
+                        + neuron_i_2[INPUT_ADDR(ni, y+1, x+0)] * synapse_2[KERNEL_ADDR(ni, z, 1, 0)]
+                        + neuron_i_2[INPUT_ADDR(ni, y+1, x+1)] * synapse_2[KERNEL_ADDR(ni, z, 1, 1)]
+                        + neuron_i_2[INPUT_ADDR(ni, y+1, x+2)] * synapse_2[KERNEL_ADDR(ni, z, 1, 2)]
+                        + neuron_i_2[INPUT_ADDR(ni, y+2, x+0)] * synapse_2[KERNEL_ADDR(ni, z, 2, 0)]
+                        + neuron_i_2[INPUT_ADDR(ni, y+2, x+1)] * synapse_2[KERNEL_ADDR(ni, z, 2, 1)]
+                        + neuron_i_2[INPUT_ADDR(ni, y+2, x+2)] * synapse_2[KERNEL_ADDR(ni, z, 2, 2)];
+
+        neuron_n[OUTPUT_ADDR(x, y, z)] = sum;
+    }
+}
+
+__global__ void convolution_layer_tiled_gpu(VTYPE *kernel, VTYPE *input, VTYPE *output) {
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -109,118 +157,78 @@ __global__ void convolution_layer_tiled_gpu(VTYPE *synapse_2, VTYPE *neuron_i_2,
 
     VTYPE sum = 0;
 
-    __shared__ VTYPE input[34 * 10 * 4];
+    __shared__ VTYPE cache[34 * 10 * 4];
     
-    for (int nni = 0; nni < CONV1_Ni; nni+=iStride) {
-        input[tidz * blockDim_x * blockDim_y + tidy * blockDim_x + tidx] = neuron_i_2[NEUR_IN_ADDR(nni + tidz, y, x)];
+    for (int nni = 0; nni < CONV_Ni; nni+=iStride) {
+        cache[tidz * blockDim_x * blockDim_y + tidy * blockDim_x + tidx] = input[INPUT_ADDR(nni + tidz, y, x)];
         if (tidy >= blockDim_y - 2) {
-            input[tidz * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx] = neuron_i_2[NEUR_IN_ADDR(nni + tidz, y + 2, x)];
+            cache[tidz * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx] = input[INPUT_ADDR(nni + tidz, y + 2, x)];
         }
         if (tidx >= blockDim_x - 2) {
-            input[tidz * blockDim_x * blockDim_y + tidy * blockDim_x + tidx + 2] = neuron_i_2[NEUR_IN_ADDR(nni + tidz, y, x + 2)];
+            cache[tidz * blockDim_x * blockDim_y + tidy * blockDim_x + tidx + 2] = input[INPUT_ADDR(nni + tidz, y, x + 2)];
         }
         if (tidx >= blockDim_x - 2 && tidy >= blockDim_y - 2) {
-            input[tidz * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx + 2] = neuron_i_2[NEUR_IN_ADDR(nni + tidz, y + 2, x + 2)];
+            cache[tidz * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx + 2] = input[INPUT_ADDR(nni + tidz, y + 2, x + 2)];
         }
         __syncthreads();
 
         for (int ni = 0; ni < iStride; ni++) {
-            sum += input[ni * blockDim_x * blockDim_y + tidy * blockDim_x + tidx] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 0, 0)]
-                + input[ni * blockDim_x * blockDim_y + tidy * blockDim_x + tidx + 1] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 0, 1)]
-                + input[ni * blockDim_x * blockDim_y + tidy * blockDim_x + tidx + 2] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 0, 2)]
-                + input[ni * blockDim_x * blockDim_y + (tidy + 1) * blockDim_x + tidx] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 1, 0)]
-                + input[ni * blockDim_x * blockDim_y + (tidy + 1) * blockDim_x + tidx + 1] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 1, 1)]
-                + input[ni * blockDim_x * blockDim_y + (tidy + 1) * blockDim_x + tidx + 2] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 1, 2)]
-                + input[ni * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 2, 0)]
-                + input[ni * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx + 1] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 2, 1)]
-                + input[ni * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx + 2] * synapse_2[SYNAPSE_ADDR(nni + ni, z, 2, 2)];
-                
-                // + neuron_i_2[NEUR_IN_ADDR(ni, y+0, x+1)] * synapse_2[SYNAPSE_ADDR(ni, z, 0, 1)]
-                // + neuron_i_2[NEUR_IN_ADDR(ni, y+0, x+2)] * synapse_2[SYNAPSE_ADDR(ni, z, 0, 2)]
-                // + neuron_i_2[NEUR_IN_ADDR(ni, y+1, x+0)] * synapse_2[SYNAPSE_ADDR(ni, z, 1, 0)]
-                // + neuron_i_2[NEUR_IN_ADDR(ni, y+1, x+1)] * synapse_2[SYNAPSE_ADDR(ni, z, 1, 1)]
-                // + neuron_i_2[NEUR_IN_ADDR(ni, y+1, x+2)] * synapse_2[SYNAPSE_ADDR(ni, z, 1, 2)]
-                // + neuron_i_2[NEUR_IN_ADDR(ni, y+2, x+0)] * synapse_2[SYNAPSE_ADDR(ni, z, 2, 0)]
-                // + neuron_i_2[NEUR_IN_ADDR(ni, y+2, x+1)] * synapse_2[SYNAPSE_ADDR(ni, z, 2, 1)]
-                // + neuron_i_2[NEUR_IN_ADDR(ni, y+2, x+2)] * synapse_2[SYNAPSE_ADDR(ni, z, 2, 2)];
+            sum += cache[ni * blockDim_x * blockDim_y + tidy * blockDim_x + tidx] * kernel[KERNEL_ADDR(nni + ni, z, 0, 0)]
+                + cache[ni * blockDim_x * blockDim_y + tidy * blockDim_x + tidx + 1] * kernel[KERNEL_ADDR(nni + ni, z, 0, 1)]
+                + cache[ni * blockDim_x * blockDim_y + tidy * blockDim_x + tidx + 2] * kernel[KERNEL_ADDR(nni + ni, z, 0, 2)]
+                + cache[ni * blockDim_x * blockDim_y + (tidy + 1) * blockDim_x + tidx] * kernel[KERNEL_ADDR(nni + ni, z, 1, 0)]
+                + cache[ni * blockDim_x * blockDim_y + (tidy + 1) * blockDim_x + tidx + 1] * kernel[KERNEL_ADDR(nni + ni, z, 1, 1)]
+                + cache[ni * blockDim_x * blockDim_y + (tidy + 1) * blockDim_x + tidx + 2] * kernel[KERNEL_ADDR(nni + ni, z, 1, 2)]
+                + cache[ni * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx] * kernel[KERNEL_ADDR(nni + ni, z, 2, 0)]
+                + cache[ni * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx + 1] * kernel[KERNEL_ADDR(nni + ni, z, 2, 1)]
+                + cache[ni * blockDim_x * blockDim_y + (tidy + 2) * blockDim_x + tidx + 2] * kernel[KERNEL_ADDR(nni + ni, z, 2, 2)];
         }
         __syncthreads();
     }
-    neuron_n[NEUR_OUT_ADDR(x, y, z)] = sum;
-        // int x = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // const int start_row = x * CONV1_ROWS_PROCESSED;
-    // const int end_row = min(CONV1_Ky, start_row + CONV1_ROWS_PROCESSED);
-    // for (int ny = start_row; ny < end_row; ny += CONV1_Sy) {
-    //     for (int nx = 0; nx + CONV1_Kx < CONV1_Nx; nx += CONV1_Sx) {
-    //         for (int ni = 0; ni < CONV1_Ni; ni++) {
-    //             for (int nn = 0; nn < CONV1_Nn; nn++) {
-    //                 neuron_n[NEUR_OUT_ADDR(ny, nx, nn)] = 
-    //                       neuron_i_2[NEUR_IN_ADDR(ni, ny+0, nx+0)] * synapse_2[SYNAPSE_ADDR(ni, nn, 0, 0)]
-    //                     + neuron_i_2[NEUR_IN_ADDR(ni, ny+0, nx+1)] * synapse_2[SYNAPSE_ADDR(ni, nn, 0, 1)]
-    //                     + neuron_i_2[NEUR_IN_ADDR(ni, ny+0, nx+2)] * synapse_2[SYNAPSE_ADDR(ni, nn, 0, 2)]
-    //                     + neuron_i_2[NEUR_IN_ADDR(ni, ny+1, nx+0)] * synapse_2[SYNAPSE_ADDR(ni, nn, 1, 0)]
-    //                     + neuron_i_2[NEUR_IN_ADDR(ni, ny+1, nx+1)] * synapse_2[SYNAPSE_ADDR(ni, nn, 1, 1)]
-    //                     + neuron_i_2[NEUR_IN_ADDR(ni, ny+1, nx+2)] * synapse_2[SYNAPSE_ADDR(ni, nn, 1, 2)]
-    //                     + neuron_i_2[NEUR_IN_ADDR(ni, ny+2, nx+0)] * synapse_2[SYNAPSE_ADDR(ni, nn, 2, 0)]
-    //                     + neuron_i_2[NEUR_IN_ADDR(ni, ny+2, nx+1)] * synapse_2[SYNAPSE_ADDR(ni, nn, 2, 1)]
-    //                     + neuron_i_2[NEUR_IN_ADDR(ni, ny+2, nx+2)] * synapse_2[SYNAPSE_ADDR(ni, nn, 2, 2)];
-
-    //                 // neuron_n[ny][nx][nn] = (
-    //                 //           neuron_i_2[ni][ny+0][nx+0] * synapse_2[ni][nn][0][0]
-    //                 //         + neuron_i_2[ni][ny+0][nx+1] * synapse_2[ni][nn][0][1]
-    //                 //         + neuron_i_2[ni][ny+0][nx+2] * synapse_2[ni][nn][0][2]
-    //                 //         + neuron_i_2[ni][ny+1][nx+0] * synapse_2[ni][nn][1][0]
-    //                 //         + neuron_i_2[ni][ny+1][nx+1] * synapse_2[ni][nn][1][1]
-    //                 //         + neuron_i_2[ni][ny+1][nx+2] * synapse_2[ni][nn][1][2]
-    //                 //         + neuron_i_2[ni][ny+2][nx+0] * synapse_2[ni][nn][2][0]
-    //                 //         + neuron_i_2[ni][ny+2][nx+1] * synapse_2[ni][nn][2][1]
-    //                 //         + neuron_i_2[ni][ny+2][nx+2] * synapse_2[ni][nn][2][2]
-    //                 // );
-    //             }
-    //         }
-    //     }
-    // }
+    output[OUTPUT_ADDR(x, y, z)] = sum;
 }
 
 int main(const int argc, const char** argv) {
-    VTYPE *synapse_2 =  (VTYPE*)malloc(sizeof(VTYPE) * CONV1_SYNAPSE_SIZE);
-    VTYPE *neuron_i_2 = (VTYPE*)malloc(sizeof(VTYPE) * CONV1_NEURON_INPUT_SIZE);
-    VTYPE *neuron_n =   (VTYPE*)malloc(sizeof(VTYPE) * CONV1_NEURON_OUTPUT_SIZE);
-    VTYPE *neuron_n_validation = (VTYPE*)malloc(sizeof(VTYPE) * CONV1_NEURON_OUTPUT_SIZE);
-    for(int i=0; i<CONV1_SYNAPSE_SIZE; i++)
-        synapse_2[i] = (float)rand() / (float)RAND_MAX;
-    for(int i=0; i<CONV1_NEURON_INPUT_SIZE; i++)
-        neuron_i_2[i] = (float)rand() / (float)RAND_MAX;
-    
+    VTYPE *kernel =  (VTYPE*)malloc(sizeof(VTYPE) * CONV_FILTER_SIZE);
+    VTYPE *input = (VTYPE*)malloc(sizeof(VTYPE) * CONV_INPUT_SIZE);
+    VTYPE *output =   (VTYPE*)malloc(sizeof(VTYPE) * CONV_OUTPUT_SIZE);
+    VTYPE *output_validation = (VTYPE*)malloc(sizeof(VTYPE) * CONV_OUTPUT_SIZE);
+    for(int i=0; i<CONV_FILTER_SIZE; i++)
+        kernel[i] = (float)rand() / (float)RAND_MAX;
+    for(int i=0; i<CONV_INPUT_SIZE; i++)
+        input[i] = (float)rand() / (float)RAND_MAX;
+    for(int i=0; i<CONV_OUTPUT_SIZE; i++) {
+        output[i] = 0.0f;
+        output_validation[i] = 0.0f;
+    }
     const int X_DIM = 1;
     const int Y_DIM = 1;
     const int Z_DIM = 1024;
-    dim3 gridDim(CONV1_NXSCL/X_DIM, CONV1_NYSCL/Y_DIM, CONV1_Nn/Z_DIM);
+    dim3 gridDim(CONV_NXSCL/X_DIM, CONV_NYSCL/Y_DIM, CONV_Nn/Z_DIM);
     dim3 blockDim(X_DIM, Y_DIM, Z_DIM);
 
     VTYPE *cuInput, *cuKernels, *cuOutput;
-    CHECK_CUDA_ERROR(cudaMalloc(&cuInput, CONV1_NEURON_INPUT_SIZE*sizeof(VTYPE)));
-    CHECK_CUDA_ERROR(cudaMalloc(&cuKernels, CONV1_SYNAPSE_SIZE*sizeof(VTYPE)));
-    CHECK_CUDA_ERROR(cudaMalloc(&cuOutput, CONV1_NEURON_OUTPUT_SIZE*sizeof(VTYPE)));
-    CHECK_CUDA_ERROR(cudaMemcpy(cuInput, neuron_i_2, CONV1_NEURON_INPUT_SIZE*sizeof(VTYPE), cudaMemcpyHostToDevice));
-    CHECK_CUDA_ERROR(cudaMemcpy(cuKernels, synapse_2, CONV1_SYNAPSE_SIZE*sizeof(VTYPE), cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMalloc(&cuInput, CONV_INPUT_SIZE*sizeof(VTYPE)));
+    CHECK_CUDA_ERROR(cudaMalloc(&cuKernels, CONV_FILTER_SIZE*sizeof(VTYPE)));
+    CHECK_CUDA_ERROR(cudaMalloc(&cuOutput, CONV_OUTPUT_SIZE*sizeof(VTYPE)));
+    CHECK_CUDA_ERROR(cudaMemcpy(cuInput, input, CONV_INPUT_SIZE*sizeof(VTYPE), cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMemcpy(cuKernels, kernel, CONV_FILTER_SIZE*sizeof(VTYPE), cudaMemcpyHostToDevice));
 
-    convolution_layer_tiled_gpu<<<gridDim, blockDim>>>(cuKernels, cuInput, cuOutput);
+    convolution_layer_parallelized_gpu<<<gridDim, blockDim>>>(cuKernels, cuInput, cuOutput);
 
-    CHECK_CUDA_ERROR(cudaMemcpy(neuron_n, cuOutput, CONV1_NEURON_OUTPUT_SIZE*sizeof(VTYPE), cudaMemcpyDeviceToHost));
+    CHECK_CUDA_ERROR(cudaMemcpy(output, cuOutput, CONV_OUTPUT_SIZE*sizeof(VTYPE), cudaMemcpyDeviceToHost));
     
-    convolution_layer(synapse_2, neuron_i_2, neuron_n_validation);
-    // assert(is_gpu_cpu_arr_equal(neuron_n, neuron_n_validation, CONV1_NEURON_OUTPUT_SIZE));
+    convolution_layer_base(kernel, input, output_validation);
+    assert(is_gpu_cpu_arr_equal(output, output_validation, CONV_OUTPUT_SIZE));
 
     cudaFree(cuOutput);
     cudaFree(cuInput);
     cudaFree(cuKernels);
 
-    // free(synapse_2);
-    // free(neuron_i_2);
-    // free(neuron_n);
-    // free(neuron_n_validation);
+    // free(kernel);
+    // free(input);
+    // free(output);
+    // free(output_validation);
 
     CHECK_LAST_CUDA_ERROR();
     cudaDeviceReset();
