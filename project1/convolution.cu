@@ -24,12 +24,6 @@
     const int Ky = 3;
     const int Ni = 64;
     const int Nn = 64;
-    // const int Nx = 1;
-    // const int Ny = 1;
-    // const int Kx = 1;
-    // const int Ky = 1;
-    // const int Ni = 1;
-    // const int Nn = 1;
 #else
     const int Nx = 14;
     const int Ny = 14;
@@ -91,15 +85,15 @@ void runCUDNNConv(float *input, float *kernels, float *output)
 }
 
 
-dim3 nBlocks(outNx, outNy, Nn); // 222, 222, 64
+dim3 nBlocks(outNx, outNy, 1); // 222, 222, 64
 // dim3 nThreads(Ni, Kx, Ky); // 64, 3, 3
-dim3 nThreads(1, 1, 1);
+dim3 nThreads(Nn, 1, 1);
 __global__ void Conv2dGpu(float *input, float *kernels, float *output)
 {
     int oX = blockIdx.x;
     int oY = blockIdx.y;
-    int oZ = blockIdx.z;
-    // int oZ = threadIdx.x;
+    // int oZ = blockIdx.z;
+    int oZ = threadIdx.x;
     float sum = 0;
     for(int i=0; i<Ni; i++) {
         for(int y=0; y<Ky; y++) {
@@ -137,11 +131,6 @@ int main(void)
     
     // CUDNN Benchmark
     runCUDNNConv(input, kernels, validationOutput);
-    // std::cout << "\tInput: " << input[0] << std::endl;
-    // std::cout << "\tKernels: " << kernels[0] << std::endl;
-    // std::cout << "\tOutput: " << output[0] << std::endl;
-    // std::cout << "\tValidation Output: " << validationOutput[0] << std::endl;
-    // std::cout << "\tExpected Output: " << input[0] * kernels[0] << std::endl;
     assert(is_gpu_cpu_arr_equal(output, validationOutput, Nn*outNx*outNy));
 
     // Free Memory
