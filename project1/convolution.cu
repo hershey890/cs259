@@ -84,16 +84,14 @@ void runCUDNNConv(float *input, float *kernels, float *output)
     
 }
 
-
-dim3 nBlocks(outNx, outNy, 1); // 222, 222, 64
-// dim3 nThreads(Ni, Kx, Ky); // 64, 3, 3
-dim3 nThreads(Nn, 1, 1);
+const int nThreads = 1024;
+dim3 gridDims(outNx/2, outNy/2, 1); // 222, 222, 64
+dim3 blockDims(2, 2, Nn); // 64, 16, 1
 __global__ void Conv2dGpu(float *input, float *kernels, float *output)
 {
-    int oX = blockIdx.x;
-    int oY = blockIdx.y;
-    // int oZ = blockIdx.z;
-    int oZ = threadIdx.x;
+    int oX = 2*blockIdx.x + threadIdx.x;
+    int oY = 2*blockIdx.y + threadIdx.y;
+    int oZ = threadIdx.z;
     float sum = 0;
     for(int i=0; i<Ni; i++) {
         for(int y=0; y<Ky; y++) {
@@ -126,7 +124,7 @@ int main(void)
     cudaMalloc(&cuOutput, Nn*outNx*outNy*sizeof(float));
     cudaMemcpy(cuInput, input, Ni*Nx*Ny*sizeof(float), cudaMemcpyHostToDevice);
     CHECK_CUDA_ERROR(cudaMemcpy(cuKernels, kernels, Nn*Ni*Kx*Ky*sizeof(float), cudaMemcpyHostToDevice));
-    Conv2dGpu<<<nBlocks, nThreads>>>(cuInput, cuKernels, cuOutput);
+    Conv2dGpu<<<gridDims, blockDims>>>(cuInput, cuKernels, cuOutput);
     CHECK_CUDA_ERROR(cudaMemcpy(output, cuOutput, Nn*outNx*outNy*sizeof(float), cudaMemcpyDeviceToHost));
     
     // CUDNN Benchmark
