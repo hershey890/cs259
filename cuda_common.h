@@ -1,3 +1,6 @@
+#ifndef CUDA_COMMON_H
+#define CUDA_COMMON_H
+
 #include <fstream>
 #include <iostream>
 #include <cuda_runtime.h>
@@ -103,3 +106,43 @@ void arrayToFile(T *arr, int size, std::string filename)
         f << arr[i] << "\n";
     f.close();
 }
+
+
+bool is_gpu_cpu_arr_equal(float *output, float *cuOutput, float outputLen) {
+    for(int i=0; i<outputLen; i++) {
+        float diff = abs(output[i] - cuOutput[i])/(abs(cuOutput[i]) + 0.0001);
+        if(diff > 0.05)
+            return false;
+    }
+    return true;
+}
+
+
+// bool is_gpu_cpu_arr_equal(int *output, int *cuOutput, int outputLen) {
+//     for(int i=0; i<outputLen; i++) {
+//         if(output[i] != cuOutput[i])
+//             return false;
+//     }
+//     return true;
+// }
+
+
+/* Prints the GPU info: threads, max blocks x, y, z
+ *  @param: void    
+ *  @return: void
+ */
+void GetGPUInfo() {
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+
+    unsigned int threads = prop.maxThreadsPerBlock;
+    unsigned int max_blocks_x = prop.maxGridSize[0];
+    unsigned int max_blocks_y = prop.maxGridSize[1];
+    unsigned int max_blocks_z = prop.maxGridSize[2];
+    std::cout << "threads: " << threads << std::endl;
+    std::cout << "max_blocks x: " << max_blocks_x << std::endl;
+    std::cout << "max_blocks y: " << max_blocks_y << std::endl;
+    std::cout << "max_blocks z: " << max_blocks_z << std::endl;
+}
+
+#endif

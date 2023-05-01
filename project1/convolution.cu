@@ -24,6 +24,12 @@
     const int Ky = 3;
     const int Ni = 64;
     const int Nn = 64;
+    // const int Nx = 1;
+    // const int Ny = 1;
+    // const int Kx = 1;
+    // const int Ky = 1;
+    // const int Ni = 1;
+    // const int Nn = 1;
 #else
     const int Nx = 14;
     const int Ny = 14;
@@ -35,9 +41,9 @@
 const int outNx = Nx - (Kx-1); // assuming no padding for now
 const int outNy = Ny - (Ky-1); 
 
-const int nIters = 1; // # of times to average time calculation over
-const int nBlocks = 500; // Titan V has 640 cores and 80 SM
-const int nThreads = 1024; // divisible by 32, max 1024
+// const int nIters = 1; // # of times to average time calculation over
+// const int nBlocks = 500; // Titan V has 640 cores and 80 SM
+// const int nThreads = 1024; // divisible by 32, max 1024
 
 
 /*
@@ -72,8 +78,10 @@ void runCUDNNConv(float *input, float *kernels, float *output)
     cudaMalloc(&cuOutput, Nn*outNx*outNy*sizeof(float));
     cudaMemcpy(cuInput, input, Ni*Nx*Ny*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(cuKernels, kernels, Nn*Ni*Kx*Ky*sizeof(float), cudaMemcpyHostToDevice);
+
     float alpha = 1.0f, beta = 0.0f;
     cudnnConvolutionForward(cudnn, &alpha, inputDesc, cuInput, kernelDesc, cuKernels, convDesc, CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM, NULL, 0, &beta, outputDesc, cuOutput);
+
     cudaMemcpy(output, cuOutput, Nn*outNx*outNy*sizeof(float), cudaMemcpyDeviceToHost);
     
     cudaFree(cuInput);
@@ -83,9 +91,25 @@ void runCUDNNConv(float *input, float *kernels, float *output)
 }
 
 
+dim3 nBlocks(outNx, outNy, Nn); // 222, 222, 64
+// dim3 nThreads(Ni, Kx, Ky); // 64, 3, 3
+dim3 nThreads(1, 1, 1);
 __global__ void Conv2dGpu(float *input, float *kernels, float *output)
 {
-    ;
+    int oX = blockIdx.x;
+    int oY = blockIdx.y;
+    int oZ = blockIdx.z;
+    // int oZ = threadIdx.x;
+    float sum = 0;
+    for(int i=0; i<Ni; i++) {
+        for(int y=0; y<Ky; y++) {
+            for(int x=0; x<Kx; x++) {
+                sum += kernels[oZ*Ni*Kx*Ky + i*Kx*Ky + y*Kx + x]
+                    * input[i*Nx*Ny + (oY+y)*Nx + (oX+x)];
+            }
+        }
+    }
+    output[oZ*outNx*outNy + oY*outNx + oX] = sum;
 }
 
 
@@ -95,13 +119,11 @@ int main(void)
     float *input = (float*)malloc(Ni*Nx*Ny*sizeof(float));
     float *kernels   = (float*)malloc(Nn*Ni*Kx*Ky*sizeof(float));
     float *output  = (float*)malloc(Nn*outNx*outNy*sizeof(float));
+    float *validationOutput = (float*)malloc(Nn*outNx*outNy*sizeof(float));
     for(int i=0; i<Nx*Ny; i++)
         input[i] = (float)rand() / (float)RAND_MAX;
     for(int i=0; i<Nn*Kx*Ky; i++)
         kernels[i] = (float)rand() / (float)RAND_MAX;
-
-    // CUDNN Benchmark
-    runCUDNNConv(input, kernels, output);
 
     // GPU Implementation
     float *cuInput, *cuKernels, *cuOutput;
@@ -109,10 +131,23 @@ int main(void)
     cudaMalloc(&cuKernels, Nn*Ni*Kx*Ky*sizeof(float));
     cudaMalloc(&cuOutput, Nn*outNx*outNy*sizeof(float));
     cudaMemcpy(cuInput, input, Ni*Nx*Ny*sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(cuKernels, kernels, Nn*Ni*Kx*Ky*sizeof(float), cudaMemcpyHostToDevice);
+    CHECK_CUDA_ERROR(cudaMemcpy(cuKernels, kernels, Nn*Ni*Kx*Ky*sizeof(float), cudaMemcpyHostToDevice));
     Conv2dGpu<<<nBlocks, nThreads>>>(cuInput, cuKernels, cuOutput);
+    CHECK_CUDA_ERROR(cudaMemcpy(output, cuOutput, Nn*outNx*outNy*sizeof(float), cudaMemcpyDeviceToHost));
+    
+    // CUDNN Benchmark
+    runCUDNNConv(input, kernels, validationOutput);
+    // std::cout << "\tInput: " << input[0] << std::endl;
+    // std::cout << "\tKernels: " << kernels[0] << std::endl;
+    // std::cout << "\tOutput: " << output[0] << std::endl;
+    // std::cout << "\tValidation Output: " << validationOutput[0] << std::endl;
+    // std::cout << "\tExpected Output: " << input[0] * kernels[0] << std::endl;
+    assert(is_gpu_cpu_arr_equal(output, validationOutput, Nn*outNx*outNy));
 
     // Free Memory
+    CHECK_CUDA_ERROR(cudaFree(cuInput));
+    cudaFree(cuKernels);
+    cudaFree(cuOutput);
     free(output);
     free(kernels);
     free(input);
