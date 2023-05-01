@@ -85,21 +85,28 @@ void runCUDNNConv(float *input, float *kernels, float *output)
 }
 
 const int nThreads = 1024;
-dim3 gridDims(outNx/2, outNy/2, 1); // 222, 222, 64
-dim3 blockDims(2, 2, Nn); // 64, 16, 1
+const int blockXDim = 6;
+const int blockYDim = 2;
+dim3 gridDims(outNx/blockXDim, outNy/blockYDim, 1); // 222, 222, 64
+dim3 blockDims(blockXDim, blockYDim, Nn); // 64, 16, 1
 __global__ void Conv2dGpu(float *input, float *kernels, float *output)
 {
-    int oX = 2*blockIdx.x + threadIdx.x;
-    int oY = 2*blockIdx.y + threadIdx.y;
+    int oX = blockXDim*blockIdx.x + threadIdx.x;
+    int oY = blockYDim*blockIdx.y + threadIdx.y;
     int oZ = threadIdx.z;
     float sum = 0;
     for(int i=0; i<Ni; i++) {
-        for(int y=0; y<Ky; y++) {
-            for(int x=0; x<Kx; x++) {
-                sum += kernels[oZ*Ni*Kx*Ky + i*Kx*Ky + y*Kx + x]
-                    * input[i*Nx*Ny + (oY+y)*Nx + (oX+x)];
-            }
-        }
+        const int kernelIdxPrefix = oZ*Ni*Kx*Ky + i*Kx*Ky;
+        const int inputIdxPrefix = i*Nx*Ny;
+        sum +=    kernels[kernelIdxPrefix + 0] * input[inputIdxPrefix + (oY+0)*Nx + (oX+0)]
+               +  kernels[kernelIdxPrefix + 1] * input[inputIdxPrefix + (oY+0)*Nx + (oX+1)]
+               +  kernels[kernelIdxPrefix + 2] * input[inputIdxPrefix + (oY+0)*Nx + (oX+2)]
+               +  kernels[kernelIdxPrefix + 3] * input[inputIdxPrefix + (oY+1)*Nx + (oX+0)]
+               +  kernels[kernelIdxPrefix + 4] * input[inputIdxPrefix + (oY+1)*Nx + (oX+1)]
+               +  kernels[kernelIdxPrefix + 5] * input[inputIdxPrefix + (oY+1)*Nx + (oX+2)]
+               +  kernels[kernelIdxPrefix + 6] * input[inputIdxPrefix + (oY+2)*Nx + (oX+0)]
+               +  kernels[kernelIdxPrefix + 7] * input[inputIdxPrefix + (oY+2)*Nx + (oX+1)]
+               +  kernels[kernelIdxPrefix + 8] * input[inputIdxPrefix + (oY+2)*Nx + (oX+2)];
     }
     output[oZ*outNx*outNy + oY*outNx + oX] = sum;
 }
