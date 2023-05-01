@@ -16,7 +16,7 @@
 #include "../cuda_common.h"
 
 
-#define CONV1
+// #define CONV1
 #ifdef CONV1
     const int Nx = 224;
     const int Ny = 224;
@@ -29,8 +29,8 @@
     const int Ny = 14;
     const int Kx = 3;
     const int Ky = 3;
-    const int Ni = 12;
-    const int Nn = 12;
+    const int Ni = 512;
+    const int Nn = 512;
 #endif
 const int outNx = Nx - (Kx-1); // assuming no padding for now
 const int outNy = Ny - (Ky-1); 
@@ -88,16 +88,22 @@ void runCUDNNConv(float *input, float *kernels, float *output)
     const int blockXDim = 6;
     const int blockYDim = 2;
 #else
-    const int blockXDim = 2;
-    const int blockYDim = 2;
+    const int blockXDim = 1;
+    const int blockYDim = 1;
 #endif
-dim3 gridDims(outNx/blockXDim, outNy/blockYDim, 1); // 222, 222, 64
-dim3 blockDims(blockXDim, blockYDim, Nn); // 64, 16, 1
+dim3 gridDims(outNx/blockXDim, outNy/blockYDim, 1);
+dim3 blockDims(Nn, blockXDim, blockYDim);
 __global__ void Conv2dGpu(float *input, float *kernels, float *output)
 {
-    int oX = blockXDim*blockIdx.x + threadIdx.x;
-    int oY = blockYDim*blockIdx.y + threadIdx.y;
-    int oZ = threadIdx.z;
+    #ifdef CONV1
+        int oX = blockXDim*blockIdx.x + threadIdx.x;
+        int oY = blockYDim*blockIdx.y + threadIdx.y;
+        int oZ = threadIdx.z;
+    #else
+        int oX = blockXDim*blockIdx.x + threadIdx.y;
+        int oY = blockYDim*blockIdx.y + threadIdx.x;
+        int oZ = threadIdx.x;
+    #endif
     float sum = 0;
     for(int i=0; i<Ni; i++) {
         const int kernelIdxPrefix = oZ*Ni*Kx*Ky + i*Kx*Ky;
