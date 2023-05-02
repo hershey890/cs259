@@ -85,40 +85,40 @@ void runCUDNNConv(float *input, float *kernels, float *output)
 }
 
 #ifdef CONV1
-    const int blockXDim = 6;
-    const int blockYDim = 2;
-#else
-    const int blockXDim = 1;
+    const int blockXDim = 222;
     const int blockYDim = 1;
+    const int blockZDim = 4;
+#else
+    const int blockXDim = outNx;
+    const int blockYDim = outNy;
+    const int blockZDim = 4;
 #endif
-dim3 gridDims(outNx/blockXDim, outNy/blockYDim, 1);
-dim3 blockDims(Nn, blockXDim, blockYDim);
+
+dim3 gridDims(outNx/blockXDim, outNy/blockYDim, Nn/blockZDim);
+dim3 blockDims(blockXDim, blockYDim, blockZDim);
 __global__ void Conv2dGpu(float *input, float *kernels, float *output)
 {
-    #ifdef CONV1
-        int oX = blockXDim*blockIdx.x + threadIdx.x;
-        int oY = blockYDim*blockIdx.y + threadIdx.y;
-        int oZ = threadIdx.z;
-    #else
-        int oX = blockXDim*blockIdx.x + threadIdx.y;
-        int oY = blockYDim*blockIdx.y + threadIdx.x;
-        int oZ = threadIdx.x;
-    #endif
-    float sum = 0;
-    for(int i=0; i<Ni; i++) {
-        const int kernelIdxPrefix = oZ*Ni*Kx*Ky + i*Kx*Ky;
-        const int inputIdxPrefix = i*Nx*Ny;
-        sum +=    kernels[kernelIdxPrefix + 0] * input[inputIdxPrefix + (oY+0)*Nx + (oX+0)]
-               +  kernels[kernelIdxPrefix + 1] * input[inputIdxPrefix + (oY+0)*Nx + (oX+1)]
-               +  kernels[kernelIdxPrefix + 2] * input[inputIdxPrefix + (oY+0)*Nx + (oX+2)]
-               +  kernels[kernelIdxPrefix + 3] * input[inputIdxPrefix + (oY+1)*Nx + (oX+0)]
-               +  kernels[kernelIdxPrefix + 4] * input[inputIdxPrefix + (oY+1)*Nx + (oX+1)]
-               +  kernels[kernelIdxPrefix + 5] * input[inputIdxPrefix + (oY+1)*Nx + (oX+2)]
-               +  kernels[kernelIdxPrefix + 6] * input[inputIdxPrefix + (oY+2)*Nx + (oX+0)]
-               +  kernels[kernelIdxPrefix + 7] * input[inputIdxPrefix + (oY+2)*Nx + (oX+1)]
-               +  kernels[kernelIdxPrefix + 8] * input[inputIdxPrefix + (oY+2)*Nx + (oX+2)];
+    int oX = blockXDim*blockIdx.x + threadIdx.x;
+    int oY = blockYDim*blockIdx.y + threadIdx.y;
+    int oZ = blockZDim*blockIdx.z + threadIdx.z;
+
+    if (oX < outNx && oY < outNy && oZ < Nn) {
+        float sum = 0;
+        for(int i=0; i<Ni; i++) {
+            const int kernelIdxPrefix = oZ*Ni*Kx*Ky + i*Kx*Ky;
+            const int inputIdxPrefix = i*Nx*Ny;
+            sum += kernels[kernelIdxPrefix + 0] * input[inputIdxPrefix + (oY+0)*Nx + (oX+0)]
+                +  kernels[kernelIdxPrefix + 1] * input[inputIdxPrefix + (oY+0)*Nx + (oX+1)]
+                +  kernels[kernelIdxPrefix + 2] * input[inputIdxPrefix + (oY+0)*Nx + (oX+2)]
+                +  kernels[kernelIdxPrefix + 3] * input[inputIdxPrefix + (oY+1)*Nx + (oX+0)]
+                +  kernels[kernelIdxPrefix + 4] * input[inputIdxPrefix + (oY+1)*Nx + (oX+1)]
+                +  kernels[kernelIdxPrefix + 5] * input[inputIdxPrefix + (oY+1)*Nx + (oX+2)]
+                +  kernels[kernelIdxPrefix + 6] * input[inputIdxPrefix + (oY+2)*Nx + (oX+0)]
+                +  kernels[kernelIdxPrefix + 7] * input[inputIdxPrefix + (oY+2)*Nx + (oX+1)]
+                +  kernels[kernelIdxPrefix + 8] * input[inputIdxPrefix + (oY+2)*Nx + (oX+2)];
+        }
+        output[oZ*outNx*outNy + oY*outNx + oX] = sum;
     }
-    output[oZ*outNx*outNy + oY*outNx + oX] = sum;
 }
 
 
