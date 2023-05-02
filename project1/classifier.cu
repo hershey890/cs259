@@ -43,16 +43,16 @@ const int nBlocks = 500; // Titan V has 640 cores and 80 SM
 const int nThreads = 1024; // divisible by 32, max 1024
 
 
-bool is_gpu_cpu_arr_equal(float *output, float *cuOutput, float outputLen) {
-    for(int i=0; i<outputLen; i++) {
-        float diff = abs(output[i] - cuOutput[i])/(abs(cuOutput[i]) + 0.0001);
-        if(diff > 0.05) {
-            std::cout << output[i] << " " << cuOutput[i] << " " << diff << std::endl;
-            return false;
-        }
-    }
-    return true;
-}
+// bool is_gpu_cpu_arr_equal(float *output, float *cuOutput, float outputLen) {
+//     for(int i=0; i<outputLen; i++) {
+//         float diff = abs(output[i] - cuOutput[i])/(abs(cuOutput[i]) + 0.0001);
+//         if(diff > 0.05) {
+//             std::cout << output[i] << " " << cuOutput[i] << " " << diff << std::endl;
+//             return false;
+//         }
+//     }
+//     return true;
+// }
 
 
 void mat_mult_cpu(float *input, float *weights, float *output)
