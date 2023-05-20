@@ -40,4 +40,5 @@
 # Convolution/Classifier executables
 conv1
 conv2
+convolution
 classifier
