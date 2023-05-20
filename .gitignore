@@ -1,3 +1,9 @@
+# Self
+.gitignore
+
+# JetBrains
+.idea/
+
 # Prerequisites
 *.d
 
@@ -31,3 +37,7 @@
 *.out
 *.app
 
+# Convolution/Classifier executables
+conv1
+conv2
+classifier

@@ -37,3 +37,26 @@
 |=======================================================================================|
 |    0   N/A  N/A        22      G   /Xwayland                                 N/A      |
 +---------------------------------------------------------------------------------------+
+
+# Important parameters for the TitanV/V100 
+## Possible Parametrization Options
+- Theoretical bandwidth - 900 GB/s (at 877 MHz)
+### L1 data 
+Size                     32...128 KiB
+Line size                32 B
+Hit latency              28
+Number of sets           4 
+Load granularity         32 B 
+Update granularity       128 B 
+Update policy            non-LRU
+Physical address indexed no
+### L2 data
+Size                     6,144 KiB
+Line size                64 B
+Hit latency              ∼193
+Populated by cudaMemcpy  yes
+Physical address indexed yes
+### Arithmetic throughput TFLOPS through PCIe
+Half precision   83.03
+Single precision 14.03
+Double precision 7.07
