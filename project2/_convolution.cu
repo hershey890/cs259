@@ -15,36 +15,32 @@
 #include "cublas_v2.h"
 #include "../cuda_common.h"
 
+#define Nx $Nx
+#define Ny $Ny
+#define Kx $Kx
+#define Ky $Ky
+#define Ni $Ni
+#define Nn $Nn
+#define blockXDim $blockXDim
+#define blockYDim $blockYDim
+#define blockZDim $blockZDim
 
-// #define CONV1
-#ifdef CONV1
-    const int Nx = 224;
-    const int Ny = 224;
-    const int Kx = 3;
-    const int Ky = 3;
-    const int Ni = 64;
-    const int Nn = 64;
-#else
-    const int Nx = 14;
-    const int Ny = 14;
-    const int Kx = 3;
-    const int Ky = 3;
-    const int Ni = 512;
-    const int Nn = 512;
-#endif
 const int outNx = Nx - (Kx-1); // assuming no padding for now
-const int outNy = Ny - (Ky-1); 
+const int outNy = Ny - (Ky-1);
 
-// const int nIters = 1; // # of times to average time calculation over
-// const int nBlocks = 500; // Titan V has 640 cores and 80 SM
-// const int nThreads = 1024; // divisible by 32, max 1024
-
+/**
+ * Returns true if we need to enforce correctness on the inputs given (Conv1 or Conv2 need to be correct).
+ */
+bool isCorrectnessEnforced() {
+    return (Nx==224 && Ny==224 && Kx==3 && Ky==3 && Ni==64 && Nn==64)
+      || (Nx==14 && Ny==14 && Kx==3 && Ky==3 && Ni==512 && Nn==512);
+}
 
 /*
  * Run convolution using cuDNN
  * @param input: input tensor NCHW (# outputs, # input channels, height, width)
  * @param kernels: kernel tensor NCHW (# outputs, # input channels, height, width)
- * @param output: output tensor NCHW (# outputs, # input channels, height, width). 
+ * @param output: output tensor NCHW (# outputs, # input channels, height, width).
  *  Output is assumed to be preallocated and is overwritten.
  */
 void runCUDNNConv(float *input, float *kernels, float *output)
@@ -77,22 +73,12 @@ void runCUDNNConv(float *input, float *kernels, float *output)
     cudnnConvolutionForward(cudnn, &alpha, inputDesc, cuInput, kernelDesc, cuKernels, convDesc, CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM, NULL, 0, &beta, outputDesc, cuOutput);
 
     cudaMemcpy(output, cuOutput, Nn*outNx*outNy*sizeof(float), cudaMemcpyDeviceToHost);
-    
+
     cudaFree(cuInput);
     cudaFree(cuKernels);
     cudaFree(cuOutput);
-    
-}
 
-#ifdef CONV1
-    const int blockXDim = 222;
-    const int blockYDim = 1;
-    const int blockZDim = 4;
-#else
-    const int blockXDim = outNx;
-    const int blockYDim = outNy;
-    const int blockZDim = 4;
-#endif
+}
 
 dim3 gridDims(outNx/blockXDim, outNy/blockYDim, Nn/blockZDim);
 dim3 blockDims(blockXDim, blockYDim, blockZDim);
@@ -145,8 +131,10 @@ int main(void)
     CHECK_CUDA_ERROR(cudaMemcpy(output, cuOutput, Nn*outNx*outNy*sizeof(float), cudaMemcpyDeviceToHost));
     
     // CUDNN Benchmark
-    runCUDNNConv(input, kernels, validationOutput);
-    assert(is_gpu_cpu_arr_equal(output, validationOutput, Nn*outNx*outNy));
+    if (isCorrectnessEnforced()) {
+        runCUDNNConv(input, kernels, validationOutput);
+        assert(is_gpu_cpu_arr_equal(output, validationOutput, Nn * outNx * outNy));
+    }
 
     // Free Memory
     CHECK_CUDA_ERROR(cudaFree(cuInput));

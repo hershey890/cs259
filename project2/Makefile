@@ -11,4 +11,4 @@ convolution.o: convolution.cu ../cuda_common.h
 	$(CC) $(CFLAGS) -c convolution.cu
 
 clean:
-	rm -f *.o classifier convolution
+	rm -f *.o convolution convolution.o convolution.cu
