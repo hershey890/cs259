@@ -1,8 +1,6 @@
 /*
  * For benchmarking against cuDNN:
  * http://www.goldsborough.me/cuda/ml/cudnn/c++/2017/10/01/14-37-23-convolutions_with_cudnn/
- * 
- * TODO: work on depthwise component of convolution
  */
 #include <cstdlib>
 #include <iostream>
@@ -93,15 +91,11 @@ __global__ void Conv2dGpu(float *input, float *kernels, float *output)
         for(int i=0; i<Ni; i++) {
             const int kernelIdxPrefix = oZ*Ni*Kx*Ky + i*Kx*Ky;
             const int inputIdxPrefix = i*Nx*Ny;
-            sum += kernels[kernelIdxPrefix + 0] * input[inputIdxPrefix + (oY+0)*Nx + (oX+0)]
-                +  kernels[kernelIdxPrefix + 1] * input[inputIdxPrefix + (oY+0)*Nx + (oX+1)]
-                +  kernels[kernelIdxPrefix + 2] * input[inputIdxPrefix + (oY+0)*Nx + (oX+2)]
-                +  kernels[kernelIdxPrefix + 3] * input[inputIdxPrefix + (oY+1)*Nx + (oX+0)]
-                +  kernels[kernelIdxPrefix + 4] * input[inputIdxPrefix + (oY+1)*Nx + (oX+1)]
-                +  kernels[kernelIdxPrefix + 5] * input[inputIdxPrefix + (oY+1)*Nx + (oX+2)]
-                +  kernels[kernelIdxPrefix + 6] * input[inputIdxPrefix + (oY+2)*Nx + (oX+0)]
-                +  kernels[kernelIdxPrefix + 7] * input[inputIdxPrefix + (oY+2)*Nx + (oX+1)]
-                +  kernels[kernelIdxPrefix + 8] * input[inputIdxPrefix + (oY+2)*Nx + (oX+2)];
+            for (int ky=0; ky<Ky; ky++) {
+                for (int kx=0; kx<Kx; kx++) {
+                    sum += kernels[kernelIdxPrefix + ky*Ky + kx] * input[inputIdxPrefix + (oY+ky)*Nx + (oX+kx)];
+                }
+            }
         }
         output[oZ*outNx*outNy + oY*outNx + oX] = sum;
     }
