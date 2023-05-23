@@ -14,6 +14,7 @@ L2_CACHE_SIZE_MB = 4.5
 L2_BANDWIDTH_GBPS = 2155
 L1_MISS_CYCLES = 193
 L2_MISS_CYCLES = 1029
+WARP_SIZE = 32
 DRAM_BANDWIDTH_GBPS = 651
 NUM_STREAMING_MULTIPROCESSORS = 80
 SINGLE_PRECISION_THROUGHPUT = 14.03
@@ -23,15 +24,17 @@ SINGLE_PRECISION_THROUGHPUT_PER_SM = SINGLE_PRECISION_THROUGHPUT / NUM_STREAMING
 def get_execution_time(kx, ky, nx, ny, ni, nn, block_x_dim, block_y_dim, block_z_dim):
     blocks = ((nx - kx + 1) / block_x_dim) * ((ny - ky + 1) / block_y_dim) * (nn / block_z_dim)
     macs_per_sm = kx * ky * block_x_dim * block_y_dim * ni * block_z_dim
+    macs_per_thread = macs_per_sm / WARP_SIZE
+    cycles_per_thread = macs_per_thread * FFMA_CYCLES
     blocks_per_sm = math.ceil(blocks / NUM_STREAMING_MULTIPROCESSORS)
-    execution_time = (macs_per_sm / (SINGLE_PRECISION_THROUGHPUT_PER_SM / OPS_IN_TERA_OPS)) * blocks_per_sm
+    execution_time = blocks_per_sm * cycles_per_thread / BASE_CLOCK_HZ
 
     weights = kx * ky * ni * nn * DATATYPE_BYTES
     inputs = nx * ny * ni * DATATYPE_BYTES
     outputs = (nx - kx + 1) * (ny - ky + 1) * nn * DATATYPE_BYTES
     total_size_bytes = weights + inputs + outputs
     l1_miss_per_sm = (total_size_bytes / NUM_STREAMING_MULTIPROCESSORS) / (L1_CACHE_SIZE_KB * KIB_IN_BYTES)
-    l2_misses = total_size_bytes / (4.5 * KIB_IN_BYTES**2)
+    l2_misses = total_size_bytes / (L2_CACHE_SIZE_MB * KIB_IN_BYTES**2)
     l1_miss_per_sm_cycles = l1_miss_per_sm * L1_MISS_CYCLES
     l2_miss_cycles = l2_misses * L2_MISS_CYCLES
     l1_miss_time = l1_miss_per_sm_cycles / BASE_CLOCK_HZ
@@ -56,7 +59,6 @@ def get_memory_load_time(kx, ky, nx, ny, ni, nn):
     dram_load_time = total_size_bytes / (DRAM_BANDWIDTH_GBPS * (KIB_IN_BYTES**3))
 
     memory_load_time = l1_miss_time + l2_miss_time + dram_load_time
-    # print('Memory load time (us):', memory_load_time * 1e6)
     return memory_load_time
 
 
