@@ -40,7 +40,8 @@
 
 # Important parameters for the TitanV/V100 
 ## Possible Parametrization Options
-- Theoretical bandwidth - 900 GB/s (at 877 MHz)
+- Clock Speed: 1200 MHz (base) to 1455 MHz (boost)
+- Memory Clock: 848 MHz 
 ### L1 data 
 - Size                     32...128 KiB
 - Line size                32 B
@@ -60,3 +61,5 @@
 - Half precision   83.03
 - Single precision 14.03
 - Double precision 7.07
+### L1 Data Cache throughput
+- 108.3 to 256 Bytes/Cycle (per SM)
