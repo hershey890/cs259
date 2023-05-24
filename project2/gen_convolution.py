@@ -15,7 +15,7 @@ L2_CACHE_SIZE_MB = 4.5
 L2_BANDWIDTH_GBPS = 2155
 L1_MISS_CYCLES = 193
 L2_MISS_CYCLES = 1029
-SM_PER_FP_32_CORE = 32
+SM_PER_FP_32_CORE = 64
 DRAM_BANDWIDTH_GBPS = 651
 NUM_STREAMING_MULTIPROCESSORS = 80
 SINGLE_PRECISION_THROUGHPUT = 14.03
@@ -25,19 +25,14 @@ OPS_PER_MAC = 2
 GPU_MEMORY_BYTES = 12884901888
 
 
-
-def get_operation_intensity(kx, ky, nx, ny, ni, nn, mem_size_bytes, block_x_dim, block_y_dim, block_z_dim):
+def get_operation_intensity(kx, ky, nx, ny, ni, nn, mem_size_bytes):
     weights = kx * ky * ni * nn * DATATYPE_BYTES
     inputs = nx * ny * ni * DATATYPE_BYTES
     outputs = (nx - kx + 1) * (ny - ky + 1) * nn * DATATYPE_BYTES
     total_size_bytes = weights + inputs + outputs
-    print('get_operation_intensity: ', total_size_bytes, mem_size_bytes)
-    if total_size_bytes > mem_size_bytes or \
-        block_x_dim * block_y_dim * block_z_dim > THREADS_PER_BLOCK:
-        return 0.0, False
-    computations = kx * ky * nx * ny * ni * nn
-    operation_intensity = computations / mem_size_bytes
-    return operation_intensity, True
+    computations = kx * ky * nx * ny * ni * nn * OPS_PER_MAC
+    operation_intensity = computations / total_size_bytes
+    return operation_intensity
 
 
 def get_execution_time(kx, ky, nx, ny, ni, nn, block_x_dim, block_y_dim, block_z_dim):
@@ -105,6 +100,7 @@ def create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim,
     runtime_decimal, runtime_unit = runtime_match[0]
     operations = operations_match[0]
     runtime = float(runtime_decimal)
+    print(nvprof_operations_out, operations)
     if runtime_unit == 'ns':
         runtime *= 1e-9
     elif runtime_unit == 'us':
@@ -117,27 +113,45 @@ def create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim,
 def compare_model(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim, block_z_dim):
     weights = kx * ky * ni * nn * DATATYPE_BYTES
     inputs = kx * ny * ni * DATATYPE_BYTES
-    outputs = (kx - kx + 1) * (ny - ky + 1) * nn * DATATYPE_BYTES
+    outputs = (nx - kx + 1) * (ny - ky + 1) * nn * DATATYPE_BYTES
     total_size_bytes = weights + inputs + outputs
 
-    # nvprof results\
-    runtime_seconds_nvprof, operations = create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim, block_z_dim)
+    # nvprof results
+    runtime_seconds_nvprof, operations = create_and_run_convolution(
+        nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim, block_z_dim)
     operational_intensity_nvprof = operations / total_size_bytes / OPS_PER_MAC
     teraops_nvprof = (operations * OPS_IN_TERA_OPS) / runtime_seconds_nvprof
 
     # model results
-    operation_intensity_model, can_fit_l1 = get_operation_intensity(kx, ky, nx, ny, ni, nn, GPU_MEMORY_BYTES, block_x_dim, block_y_dim, block_z_dim)
+    operation_intensity_model_l1 = get_operation_intensity(
+        kx, ky, block_x_dim, block_y_dim, ni, block_z_dim, L1_CACHE_SIZE_KB * KIB_IN_BYTES)
+    operation_intensity_model_vram = get_operation_intensity(kx, ky, nx, ny, ni, nn, GPU_MEMORY_BYTES)
     execution_time = get_execution_time(kx, ky, nx, ny, ni, nn, block_x_dim, block_y_dim, block_z_dim)
     memory_load_time = get_memory_load_time(kx, ky, nx, ny, ni, nn)
     runtime_seconds_model = max(execution_time, memory_load_time)
     computations = kx * ky * nx * ny * ni * nn
     teraops_model = computations * OPS_IN_TERA_OPS / runtime_seconds_model
 
-    print("Operational intensity nv, model: ", operational_intensity_nvprof, operation_intensity_model)
-    print("TOP/s nv, model:                 ", teraops_nvprof, teraops_model)
-    print("Runtime (us) nv, model:          ", runtime_seconds_nvprof*1e6, runtime_seconds_model*1e6)
+    print("L1 Operational intensity nv, model:   ", operational_intensity_nvprof, operation_intensity_model_l1)
+    print("VRAM Operational intensity nv, model: ", operational_intensity_nvprof, operation_intensity_model_vram)
+    print("TOP/s nv, model:                      ", teraops_nvprof, teraops_model)
+    print("Runtime (us) nv, model:               ", runtime_seconds_nvprof*1e6, runtime_seconds_model*1e6)
 
-    return [operational_intensity_nvprof, operation_intensity_model, teraops_nvprof, teraops_model, runtime_seconds_nvprof, runtime_seconds_model, can_fit_l1]
+    operational_intensity_accuracy = abs(operation_intensity_model_vram - operational_intensity_nvprof) / operational_intensity_nvprof
+    teraops_accuracy = abs(teraops_model - teraops_nvprof) / teraops_nvprof
+
+    return [
+        operational_intensity_nvprof,
+        operation_intensity_model_l1,
+        operation_intensity_model_vram,
+        teraops_nvprof,
+        teraops_model,
+        runtime_seconds_nvprof,
+        runtime_seconds_model,
+        block_x_dim * block_y_dim * block_z_dim <= 1024,
+        operational_intensity_accuracy,
+        teraops_accuracy
+    ]
 
 
 def main():
@@ -172,9 +186,19 @@ if __name__ == '__main__':
 
     test_values = [
         [224, 224, 3, 3, 64, 64, 222, 1, 4],
-        [14, 14, 3, 3, 512, 512, 12, 12, 4],
-        # [100, 100, 3, 3, 100, 100, 98, 1, 4],
-        # [],
+        [224, 224, 3, 3, 64, 64, 111, 1, 8],
+        [224, 224, 3, 3, 64, 64, 222, 2, 2],
+        [224, 224, 3, 3, 64, 64, 111, 1, 4],
+        [224, 224, 3, 3, 64, 64, 111, 1, 2],
+        [224, 224, 3, 3, 64, 64, 111, 2, 1],
+        [224, 224, 3, 3, 64, 64, 111, 1, 1],
+        [14, 14, 3, 3, 512, 512, 12, 12, 4], # Nx - Kx + 1
+        [14, 14, 3, 3, 512, 512, 3, 3, 32],
+        [14, 14, 3, 3, 512, 512, 6, 6, 16],
+        [14, 14, 3, 3, 512, 512, 12, 6, 8],
+        [14, 14, 3, 3, 512, 512, 6, 12, 8],
+        [14, 14, 3, 3, 512, 512, 12, 3, 16],
+        [14, 14, 3, 3, 512, 512, 3, 12, 16],
     ]
     results = []
     for val in test_values:
@@ -183,11 +207,24 @@ if __name__ == '__main__':
         except ValueError:
             print("CUDA runtime error for: ", val)
         else:
+            block_dims = str(val[-3]) + " " + str(val[-2]) + " " + str(val[-1])
+            ret = [block_dims] + ret
             results.append(ret)
     
     with open('results.csv', 'w') as results_fo:
         csv_writer = csv.writer(results_fo)
-        csv_writer.writerow(['Operational intensity (nvprof)', 'Operational intensity (model)', 'TOP/s (nvprof)', 'TOP/s (model)', 'Runtime (us) (nvprof)', 'Runtime (us) (model)', 'Can fit in L1'])
+        csv_writer.writerow([
+            'Tile Size',
+            'Operational intensity (nvprof)',
+            'L1 Operational intensity (model)',
+            'VRAM Operational intensity (model)',
+            'TOP/s (nvprof)', 'TOP/s (model)',
+            'Runtime (us) (nvprof)',
+            'Runtime (us) (model)',
+            'Can fit in L1',
+            'Operational Intensity Absolute Difference Error',
+            'Teraops Absolute Difference Error'
+        ])
         for result in results:
             csv_writer.writerow(result)
         
