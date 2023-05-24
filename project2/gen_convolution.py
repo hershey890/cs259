@@ -14,35 +14,23 @@ L2_CACHE_SIZE_MB = 4.5
 L2_BANDWIDTH_GBPS = 2155
 L1_MISS_CYCLES = 193
 L2_MISS_CYCLES = 1029
-WARP_SIZE = 32
+SM_PER_FP_32_CORE = 64
 DRAM_BANDWIDTH_GBPS = 651
 NUM_STREAMING_MULTIPROCESSORS = 80
 SINGLE_PRECISION_THROUGHPUT = 14.03
 SINGLE_PRECISION_THROUGHPUT_PER_SM = SINGLE_PRECISION_THROUGHPUT / NUM_STREAMING_MULTIPROCESSORS
+THREADS_PER_BLOCK = 1024
 
 
 def get_execution_time(kx, ky, nx, ny, ni, nn, block_x_dim, block_y_dim, block_z_dim):
     blocks = ((nx - kx + 1) / block_x_dim) * ((ny - ky + 1) / block_y_dim) * (nn / block_z_dim)
-    macs_per_sm = kx * ky * block_x_dim * block_y_dim * ni * block_z_dim
-    macs_per_thread = macs_per_sm / WARP_SIZE
-    cycles_per_thread = macs_per_thread * FFMA_CYCLES
+    macs_for_block = kx * ky * ni * block_x_dim * block_y_dim * block_z_dim
+    macs_per_core = math.ceil(macs_for_block / SM_PER_FP_32_CORE)
+    cycles_per_core = macs_per_core * FFMA_CYCLES
     blocks_per_sm = math.ceil(blocks / NUM_STREAMING_MULTIPROCESSORS)
-    execution_time = blocks_per_sm * cycles_per_thread / BASE_CLOCK_HZ
+    execution_time = blocks_per_sm * cycles_per_core / BASE_CLOCK_HZ
 
-    weights = kx * ky * ni * nn * DATATYPE_BYTES
-    inputs = nx * ny * ni * DATATYPE_BYTES
-    outputs = (nx - kx + 1) * (ny - ky + 1) * nn * DATATYPE_BYTES
-    total_size_bytes = weights + inputs + outputs
-    l1_miss_per_sm = (total_size_bytes / NUM_STREAMING_MULTIPROCESSORS) / (L1_CACHE_SIZE_KB * KIB_IN_BYTES)
-    l2_misses = total_size_bytes / (L2_CACHE_SIZE_MB * KIB_IN_BYTES**2)
-    l1_miss_per_sm_cycles = l1_miss_per_sm * L1_MISS_CYCLES
-    l2_miss_cycles = l2_misses * L2_MISS_CYCLES
-    l1_miss_time = l1_miss_per_sm_cycles / BASE_CLOCK_HZ
-    l2_miss_time = l2_miss_cycles / BASE_CLOCK_HZ
-    dram_load_time = total_size_bytes / (DRAM_BANDWIDTH_GBPS * (KIB_IN_BYTES**3))
-    memory_load_time = l1_miss_time + l2_miss_time + dram_load_time
-
-    return execution_time + memory_load_time
+    return execution_time
 
 
 def get_memory_load_time(kx, ky, nx, ny, ni, nn):
@@ -93,7 +81,7 @@ def create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim,
 
     subprocess.call(["make"])
     nvprof_out = subprocess.check_output(["nvprof", "./convolution"], stderr=subprocess.STDOUT, universal_newlines=True)
-    subprocess.call(["make", "clean"])
+    # subprocess.call(["make", "clean"])
     runtime_match = re.findall(
         '\\d+[.]?\\d+%\\s+\\d+[.]?\\d+(?: ns|us|ms)\\s+\\d+\\s+\\d+[.]?\\d+(?:ns|us|ms)\\s+\\d+[.]?\\d+(?:ns|us|ms)\\s+'
         '(\\d+[.]?\\d+)(ns|us|ms)\\s+Conv2dGpu[(]float[*], float[*], float[*][)]', nvprof_out)
@@ -136,6 +124,7 @@ def main():
     block_y_dim = args.blockYDim
     block_z_dim = args.blockZDim
     print('{} us'.format(get_execution_time(kx, ky, nx, ny, ni, nn, block_x_dim, block_y_dim, block_z_dim) * 1e6))
+    create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim, block_z_dim)
     # print('{} us'.format(get_memory_load_time(kx, ky, nx, ny, ni, nn)))
 
     # weights = args.Kx * args.Ky * args.Ni * args.Nn * DATATYPE_BYTES
