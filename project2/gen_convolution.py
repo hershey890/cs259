@@ -3,6 +3,7 @@ import math
 import re
 import string
 import subprocess
+import csv
 
 OPS_IN_TERA_OPS = 1e-12
 KIB_IN_BYTES = 1024
@@ -14,25 +15,30 @@ L2_CACHE_SIZE_MB = 4.5
 L2_BANDWIDTH_GBPS = 2155
 L1_MISS_CYCLES = 193
 L2_MISS_CYCLES = 1029
-SM_PER_FP_32_CORE = 64
+SM_PER_FP_32_CORE = 32
 DRAM_BANDWIDTH_GBPS = 651
 NUM_STREAMING_MULTIPROCESSORS = 80
 SINGLE_PRECISION_THROUGHPUT = 14.03
 SINGLE_PRECISION_THROUGHPUT_PER_SM = SINGLE_PRECISION_THROUGHPUT / NUM_STREAMING_MULTIPROCESSORS
 THREADS_PER_BLOCK = 1024
 OPS_PER_MAC = 2
+GPU_MEMORY_BYTES = 12884901888
 
 
-def get_operation_intensity(kx, ky, nx, ny, ni, nn, mem_size_bytes):
+
+def get_operation_intensity(kx, ky, nx, ny, ni, nn, mem_size_bytes, block_x_dim, block_y_dim, block_z_dim):
     weights = kx * ky * ni * nn * DATATYPE_BYTES
     inputs = nx * ny * ni * DATATYPE_BYTES
     outputs = (nx - kx + 1) * (ny - ky + 1) * nn * DATATYPE_BYTES
     total_size_bytes = weights + inputs + outputs
-    if total_size_bytes > mem_size_bytes:
+    print('get_operation_intensity: ', total_size_bytes, mem_size_bytes)
+    if total_size_bytes > mem_size_bytes or \
+        block_x_dim * block_y_dim * block_z_dim > THREADS_PER_BLOCK:
         return 0.0, False
     computations = kx * ky * nx * ny * ni * nn
     operation_intensity = computations / mem_size_bytes
     return operation_intensity, True
+
 
 def get_execution_time(kx, ky, nx, ny, ni, nn, block_x_dim, block_y_dim, block_z_dim):
     blocks = ((nx - kx + 1) / block_x_dim) * ((ny - ky + 1) / block_y_dim) * (nn / block_z_dim)
@@ -79,10 +85,10 @@ def create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim,
         with open('convolution.cu', 'w') as interpolated_conv_fo:
             interpolated_conv_fo.write(interpolated_conv_file_str)
 
-    subprocess.call(["make"])
+    subprocess.call(["make"], stdout=subprocess.DEVNULL)
     nvprof_runtime_out = subprocess.check_output(["nvprof", "./convolution"], stderr=subprocess.STDOUT, universal_newlines=True)
     nvprof_operations_out = subprocess.check_output(["nvprof", "--kernels", "Conv2dGpu", "--metrics", "flop_count_sp", "./convolution"], stderr=subprocess.STDOUT, universal_newlines=True)
-    subprocess.call(["make", "clean"])
+    subprocess.call(["make", "clean"], stdout=subprocess.DEVNULL)
     runtime_match = re.findall(
         '\\d+[.]?\\d+%\\s+\\d+[.]?\\d+(?: ns|us|ms)\\s+\\d+\\s+\\d+[.]?\\d+(?:ns|us|ms)\\s+\\d+[.]?\\d+(?:ns|us|ms)\\s+'
         '(\\d+[.]?\\d+)(ns|us|ms)\\s+Conv2dGpu[(]float[*], float[*], float[*][)]', nvprof_runtime_out)
@@ -90,7 +96,7 @@ def create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim,
         '\\d+\\s+flop_count_sp\\s+Floating Point Operations[(]Single Precision[)]\\s+(\\d+)', nvprof_operations_out
     )
     if 'CUDA Runtime Error' in nvprof_runtime_out or 'CUDA Runtime Error' in nvprof_operations_out:
-        return
+        raise ValueError("CUDA runtime error")
     if len(runtime_match) != 1:
         # print(nvprof_runtime_out)
         raise ValueError(nvprof_operations_out)
@@ -115,25 +121,23 @@ def compare_model(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim, block_z_dim)
     total_size_bytes = weights + inputs + outputs
 
     # nvprof results\
-    try:
-        runtime_seconds_nvprof, operations = create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim, block_z_dim)
-    except ValueError as e:
-        print(e)
-        return
+    runtime_seconds_nvprof, operations = create_and_run_convolution(nx, ny, kx, ky, ni, nn, block_x_dim, block_y_dim, block_z_dim)
     operational_intensity_nvprof = operations / total_size_bytes / OPS_PER_MAC
     teraops_nvprof = (operations * OPS_IN_TERA_OPS) / runtime_seconds_nvprof
 
     # model results
-    operation_intensity_model, can_fit_l1 = get_operation_intensity(kx, ky, nx, ny, ni, nn, total_size_bytes)
+    operation_intensity_model, can_fit_l1 = get_operation_intensity(kx, ky, nx, ny, ni, nn, GPU_MEMORY_BYTES, block_x_dim, block_y_dim, block_z_dim)
     execution_time = get_execution_time(kx, ky, nx, ny, ni, nn, block_x_dim, block_y_dim, block_z_dim)
     memory_load_time = get_memory_load_time(kx, ky, nx, ny, ni, nn)
     runtime_seconds_model = max(execution_time, memory_load_time)
     computations = kx * ky * nx * ny * ni * nn
     teraops_model = computations * OPS_IN_TERA_OPS / runtime_seconds_model
 
-    print("Operational intensity: ", operational_intensity_nvprof, operation_intensity_model)
-    print("TOP/s:                 ", teraops_nvprof, teraops_model)
-    print("Runtime (us):          ", runtime_seconds_nvprof*1e6, runtime_seconds_model*1e6)
+    print("Operational intensity nv, model: ", operational_intensity_nvprof, operation_intensity_model)
+    print("TOP/s nv, model:                 ", teraops_nvprof, teraops_model)
+    print("Runtime (us) nv, model:          ", runtime_seconds_nvprof*1e6, runtime_seconds_model*1e6)
+
+    return [operational_intensity_nvprof, operation_intensity_model, teraops_nvprof, teraops_model, runtime_seconds_nvprof, runtime_seconds_model, can_fit_l1]
 
 
 def main():
@@ -164,4 +168,26 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # main()
+
+    test_values = [
+        [224, 224, 3, 3, 64, 64, 222, 1, 4],
+        [14, 14, 3, 3, 512, 512, 12, 12, 4],
+        # [100, 100, 3, 3, 100, 100, 98, 1, 4],
+        # [],
+    ]
+    results = []
+    for val in test_values:
+        try:
+            ret = compare_model(*val)
+        except ValueError:
+            print("CUDA runtime error for: ", val)
+        else:
+            results.append(ret)
+    
+    with open('results.csv', 'w') as results_fo:
+        csv_writer = csv.writer(results_fo)
+        csv_writer.writerow(['Operational intensity (nvprof)', 'Operational intensity (model)', 'TOP/s (nvprof)', 'TOP/s (model)', 'Runtime (us) (nvprof)', 'Runtime (us) (model)', 'Can fit in L1'])
+        for result in results:
+            csv_writer.writerow(result)
+        
