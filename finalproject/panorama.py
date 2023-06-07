@@ -1,3 +1,10 @@
+"""
+Resources
+---------
+https://medium.com/analytics-vidhya/panorama-formation-using-image-stitching-using-opencv-1068a0e8e47b
+https://pyimagesearch.com/2016/01/11/opencv-panorama-stitching/
+data: https://github.com/ppwwyyxx/OpenPano/releases/tag/0.1
+"""
 import sys
 import os
 import subprocess
@@ -13,13 +20,8 @@ from ransac import ransac
 # importlib.reload(sys.modules['ransac'])
 
 
-RANSAC_METHOD = 'cuda'
-# RANSAC_METHOD = 'opencv'
-# write src_pts, dst_pts, and mask to data files for opening in ransac.cu
-# files: src_dst_pts.bin, mask.bin
-WRITE_VALUES_TO_FILE = True 
-ENDIAN = 'little' # endianness to save values as
-# ENDIAN = 'big'
+WRITE_VALUES_TO_FILE = False
+ENDIAN = 'little' # 'little' or 'big'
 
 
 def _create_array_str(src_pts: np.ndarray, dst_pts: np.ndarray) -> bytes:
@@ -105,7 +107,9 @@ def _find_matches(img_left, img_right) -> Tuple[Tuple[cv2.KeyPoint], Tuple[cv2.K
 def _find_homography(
         kp1: List[cv2.KeyPoint], 
         kp2: List[cv2.KeyPoint], 
-        good_matches: List[cv2.DMatch], 
+        good_matches: List[cv2.DMatch],
+        ransac_reproj_thresh: float = 10.0,
+        ransac_max_iter: int = 10000,
         ransac_method: str='opencv', 
         write_values_to_file: bool = False
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -131,7 +135,6 @@ def _find_homography(
         mask indicating which matches are inliers
     """
     min_match_count = 10
-    reproj_thresh = 4.0 # RANSAC reprojection error threshold
 
     if len(good_matches) <= min_match_count:
         raise Exception('Not enough matches are found - {}/{}'.format(len(good_matches), min_match_count))
@@ -147,7 +150,7 @@ def _find_homography(
             f.write(pts_bytes)
 
     if ransac_method == 'opencv':
-        M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, reproj_thresh)
+        M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, ransac_reproj_thresh)
         if write_values_to_file:
             with open(PATH + '/data/mask.bin', 'wb') as f:
                 f.write(mask[:,0].tobytes())
@@ -155,10 +158,10 @@ def _find_homography(
                 f.write(M.tobytes())
                 
     elif ransac_method == 'cuda':
-        mask = ransac(src_pts, dst_pts, reproj_thresh, pts_bytes)
+        mask = ransac(src_pts, dst_pts, ransac_reproj_thresh, pts_bytes, max_iter=10000)
         src_pts = src_pts[mask[:, 0] == 1]
         dst_pts = dst_pts[mask[:, 0] == 1]
-        M, _ = cv2.findHomography(src_pts, dst_pts, 0, reproj_thresh) # without RANSAC
+        M, _ = cv2.findHomography(src_pts, dst_pts, 0, ransac_reproj_thresh) # without RANSAC
     else:
         raise ValueError('ransac_method must be one of {opencv, cuda}')
     assert mask.dtype == np.uint8
@@ -182,12 +185,14 @@ def _plot(data_folder: str, subplot_idx: int, img: np.ndarray, mode: str, filena
         cv2.imwrite(data_folder + '/data/' + filename, img)
 
 
-def main(data_folder: str | Path, mode: str = 'plot'):
+def main(data_folder: str | Path, ransac_method: str, ransac_reproj_thresh: float = 10.0, ransac_max_iter: int = 10000, mode: str = 'plot'):
     """
     Parameters
     ----------
     data_folder : str | Path
         Path to folder containing medium02 and medium03 images
+    ransac_reproj_thresh : float
+        RANSAC reprojection error threshold
     plot_mode : {'plot', 'save', None}
         indicates if images should be displayed or saved in `data_folder`
         If saved name follows the format `output_{i}_*.png`
@@ -214,7 +219,7 @@ def main(data_folder: str | Path, mode: str = 'plot'):
     kp_left, kp_right, good_matches = _find_matches(img_left, img_right)
 
     # find homography
-    M, mask = _find_homography(kp_right, kp_left, good_matches, ransac_method=RANSAC_METHOD, write_values_to_file=WRITE_VALUES_TO_FILE)
+    M, mask = _find_homography(kp_right, kp_left, good_matches, ransac_reproj_thresh, ransac_max_iter, ransac_method=ransac_method,  write_values_to_file=WRITE_VALUES_TO_FILE)
     h, w, d = img_right.shape
     pts = np.float32([[0, 0], [0, h-1], [w-1, h-1], [w-1, 0]]).reshape(-1, 1, 2)
     dst = cv2.perspectiveTransform(pts, M).astype(np.int32)
@@ -233,4 +238,4 @@ def main(data_folder: str | Path, mode: str = 'plot'):
 
 
 if __name__ == '__main__':
-    main(PATH + '/data/', mode=None)
+    main(PATH + '/data/', ransac_method='cuda', ransac_reproj_thresh=10.0, ransac_max_iter=10000, mode=None)

@@ -92,7 +92,6 @@ def main():
 
     fig, ax = plt.subplots(1, 1)
     ax.set_box_aspect(1)
-
     plt.scatter(X, y)
 
     x = np.linspace(-1, 1, num=100)
