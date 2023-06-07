@@ -73,7 +73,7 @@ def _create_array_str(src_pts: np.ndarray, dst_pts: np.ndarray) -> bytes:
     n*2*sizeof(float32) bytes for dst_pts. Each pair of bytes corresponds to one point (x,y)
 
     Word lengths (no newlines)
-    4 + 1 bytes
+    4      bytes
     n*2n*4 bytes
     n*2n*4 bytes
 
