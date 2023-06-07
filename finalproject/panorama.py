@@ -1,3 +1,10 @@
+"""
+Resources
+---------
+https://medium.com/analytics-vidhya/panorama-formation-using-image-stitching-using-opencv-1068a0e8e47b
+https://pyimagesearch.com/2016/01/11/opencv-panorama-stitching/
+data: https://github.com/ppwwyyxx/OpenPano/releases/tag/0.1
+"""
 import sys
 import os
 import subprocess
