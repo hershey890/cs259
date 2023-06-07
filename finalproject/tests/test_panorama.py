@@ -15,6 +15,7 @@ class TestCase(unittest.TestCase):
 
         byte_arr = _create_array_str(src_pts_truth, dst_pts_truth)
         n_bytes = int.from_bytes(byte_arr[:4], byteorder='little')
+        print(n_bytes)
         src_pts_bytes = byte_arr[4:4+n_bytes]
         dst_pts_bytes = byte_arr[4+n_bytes:]
 
