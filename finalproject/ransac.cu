@@ -1,29 +1,38 @@
 #include <iostream>
+#include <fstream>
 
+struct SourceDestinationPointsBytes {
+public:
+    float* src_pts_bytes; // n/2 rows x 2 cols
+    float* dst_pts_bytes; // n/2 rows x 2 cols
+};
 
-float** readPtsFile(std::string filename)
+// Read src_dst_pts.bin -
+SourceDestinationPointsBytes* readPtsFile(std::string filename)
 {
-/*
-        with open('./test.bin', 'rb') as f:
-            n_bytes = int.from_bytes(f.read(4), byteorder='little')
-            
-            src_pts_bytes = f.read(n_bytes)
-            dst_pts_bytes = f.read(n_bytes)
+    std::ifstream stream (filename, std::ios::in | std::ios::binary);
 
-            src_pts_test = np.frombuffer(src_pts_bytes, dtype=np.float32).reshape(-1, 2)
-            dst_pts_test = np.frombuffer(dst_pts_bytes, dtype=np.float32).reshape(-1, 2)
-*/
+    uint32_t n_bytes;
+    stream.read(reinterpret_cast<char*>(&n_bytes), sizeof(uint32_t));
+
+    SourceDestinationPointsBytes* bytes = new (std::nothrow) SourceDestinationPointsBytes;
+    bytes->src_pts_bytes = new (std::nothrow) float[n_bytes / sizeof(float)];
+    bytes->dst_pts_bytes = new (std::nothrow) float[n_bytes / sizeof(float)];
+    stream.read(reinterpret_cast<char*>(bytes->src_pts_bytes), n_bytes);
+    stream.read(reinterpret_cast<char*>(bytes->dst_pts_bytes), n_bytes);
+
+    stream.close();
+
+    return bytes;
 }
 
 // make 2 modes, 1 for a file and another for stdin
 float** read_stdin()
 {
+    return nullptr;
 }
 
 int main()
 {
-    std::string lineInput;
-    while (std::cin >> lineInput) {
-        std::cout << lineInput;
-    }
+    readPtsFile("./data/src_dst_pts.bin");
 }
