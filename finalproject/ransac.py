@@ -8,10 +8,9 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 
 # TODO: actually implement this, dont just return M_truth
 M_truth = np.load(PATH + "/data/M.npy")
+def _fit(M, X, Y):
+    """Fits a homography matrix to the given points
 
-
-def _fit(M, X, y):
-    """
     Parameters
     ----------
     M : np.ndarray
@@ -20,7 +19,37 @@ def _fit(M, X, y):
         source points. shape (n,2)
     y : np.ndarray
         destination points. shape (n,2)
+
+    Returns
+    -------
+    M : np.ndarray
+        3x3 homography matrix (model)
+
+    Resources
+    ---------
+    http://6.869.csail.mit.edu/fa12/lectures/lecture13ransac/lecture13ransac.pdf slide 19
     """
+    h = np.empty((9, 1), dtype=np.float32)
+    z = np.zeros(3, dtype=np.float32)
+
+    n = X.shape[0]
+    A = np.empty((2 * n, 9), dtype=np.float32)
+
+    for i in range(n):
+        x = Y[i]
+        x[2] = 1
+        x1 = Y[i][0]
+        y1 = Y[i][1]
+        a = np.array((-x1*x1, -x1*y1, -x1))
+        b = np.array((-y1*x1, -y1*y1, -y1))
+        A[2 * i] = np.hstack((X[i], z, a))
+        A[2 * i + 1] = np.hstack((z, X[i], b))
+
+    # solve for h
+    _, _, V = np.linalg.svd(A)
+    h = V[-1]
+    M = h.reshape((3, 3))
+
     return M_truth
 
 
