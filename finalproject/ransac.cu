@@ -86,56 +86,27 @@ void invert(float** src, float** dst, int n, int batchSize)
     cudaFree(P); cudaFree(INFO); cublasDestroy_v2(handle);
 }
 
-//void invert(float* invertibleMatrix, int n) {
-//    // Matrix Inversion Step 1 - Get the LU factorization
-//    float **AArray;
-//    int *infoArray;
-//    cudaMalloc(&AArray, sizeof(float**));
-//    cudaMalloc(&infoArray, sizeof(int*));
-//    cudaMemset(AArray, invertibleMatrix, sizeof(float*));
-//    cublasSgetrfBatched(
-//            handle,
-//            n,
-//            (const float **) &AArray,
-//            n,
-//            nullptr,
-//            infoArray,
-//            1
-//    );
-//
-//    // Matrix Inversion Step 2 - Use the LU factorization to perform the matrix inversion
-//    float **C_d;
-//    cudaMalloc(&C_d, sizeof(float*));
-//    cublasSgetriBatched(
-//            handle,
-//            X_len,
-//            Aarray,
-//            X_len,
-//
-//    );
-//}
-
-void linearRegressorFit(float* X, float* y, float* params, uint32_t X_len) {
-    // Pad X.T on the top with ones
+void linearRegressorFit(float* X, float* y, float* params, uint32_t N) {
+    // Pad X on the top with ones
     float *cublasXPadded;
-    float *ones = new float[X_len];
-    for (int i = 0; i < X_len; i++)
+    float *ones = new float[N];
+    for (int i = 0; i < N; i++)
         ones[i] = 1.0f;
-    cudaMalloc(&cublasXPadded, sizeof(float) * X_len * 2);
-    cudaMemcpy(cublasXPadded, ones, sizeof(float) * X_len, cudaMemcpyHostToDevice);
-    cudaMemcpy(cublasXPadded + X_len, X, sizeof(float) * X_len, cudaMemcpyHostToDevice);
+    cudaMalloc(&cublasXPadded, sizeof(float) * N * 2);
+    cudaMemcpy(cublasXPadded, ones, sizeof(float) * N, cudaMemcpyHostToDevice);
+    cudaMemcpy(cublasXPadded + N, X, sizeof(float) * N, cudaMemcpyHostToDevice);
     delete[] ones;
 
 //    std::cout << "y:";
-//    for (int i = 0; i < X_len; i++) {
+//    for (int i = 0; i < N; i++) {
 //        std::cout << ' ' << y[i];
 //    }
 //    std::cout << '\n';
 
-//    float *padded = new float[X_len * 2];
-//    cudaMemcpy(padded, cublasXPadded, sizeof(float) * X_len * 2, cudaMemcpyDeviceToHost);
+//    float *padded = new float[N * 2];
+//    cudaMemcpy(padded, cublasXPadded, sizeof(float) * N * 2, cudaMemcpyDeviceToHost);
 //    std::cout << "Padded:";
-//    for (int i = 0; i < X_len * 2; i++) {
+//    for (int i = 0; i < N * 2; i++) {
 //        std::cout << ' ' << padded[i];
 //    }
 //    std::cout << '\n';
@@ -150,10 +121,10 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t X_len) {
     cublasSgemm(
             handle,
             CUBLAS_OP_T, CUBLAS_OP_N,
-            2, 2, X_len,
+            2, 2, N,
             &alpha,
-            cublasXPadded, X_len,
-            cublasXPadded, X_len,
+            cublasXPadded, N,
+            cublasXPadded, N,
             &beta,
             cublasMatMul1, 2
     );
@@ -184,36 +155,37 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t X_len) {
     // Multiply inverse(X.T x X) by X.T
     float *cublasInverseMat, *cublasMatMul2;
     cudaMalloc(&cublasInverseMat, sizeof(float) * 4);
-    cudaMalloc(&cublasMatMul2, sizeof(float) * X_len * 2);
+    cudaMalloc(&cublasMatMul2, sizeof(float) * N * 2);
     cudaMemcpy(cublasInverseMat, dstMatrix[0], sizeof(float) * 4, cudaMemcpyHostToDevice);
-    cudaMemset(cublasMatMul2, 0, sizeof(float) * X_len * 2);
+    cudaMemset(cublasMatMul2, 0, sizeof(float) * N * 2);
     cublasSgemm(
             handle,
             CUBLAS_OP_N, CUBLAS_OP_T,
-            2, X_len, 2,
+            2, N, 2,
             &alpha,
             cublasInverseMat, 2,
-            cublasXPadded, X_len,
+            cublasXPadded, N,
             &beta,
             cublasMatMul2, 2
     ); // Gets the transpose of the answer?
 
-//    float* matMul2 = new float[X_len * 2];
-//    cudaMemcpy(matMul2, cublasMatMul2, sizeof(float) * X_len * 2, cudaMemcpyDeviceToHost);
+//    float* matMul2 = new float[N * 2];
+//    cudaMemcpy(matMul2, cublasMatMul2, sizeof(float) * N * 2, cudaMemcpyDeviceToHost);
 //    std::cout << "MatMul2:";
-//    for (int i = 0; i < X_len * 2; i++) {
+//    for (int i = 0; i < N * 2; i++) {
 //        std::cout << ' ' << matMul2[i];
 //    }
 //    std::cout << '\n';
 
     // Multiply (inverse(X.T x X) by X.T) by y
     float *cublasY, *cublasMatMul3;
-    cudaMalloc(&cublasY, sizeof(float) * X_len);
+    cudaMalloc(&cublasY, sizeof(float) * N);
     cudaMalloc(&cublasMatMul3, sizeof(float) * 2);
-    cublasSetVector(X_len, sizeof(float), y, 1, cublasY, 1);
+    cublasSetVector(N, sizeof(float), y, 1, cublasY, 1);
+    cudaMemset(cublasMatMul3, 0, sizeof(float) * 2);
     cublasSgemv(
             handle, CUBLAS_OP_N,
-            2, X_len,
+            2, N,
             &alpha,
             cublasMatMul2, 2,
             cublasY, 1,
@@ -244,6 +216,63 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t X_len) {
     cudaFree(cublasMatMul3);
     cudaFree(cublasY);
     cudaFree(cublasInverseMat);
+
+    // Cublas destroy handle
+    cublasDestroy(handle);
+}
+
+void linearRegressorPredict(float* X, float* params, uint32_t N) {
+    // Pad X in column major with ones
+    float *cublasXPadded;
+    float *xPadded = new float[N * 2];
+    for (int i = 0; i < N; i++) {
+        xPadded[i * 2] = 1.0f;
+        xPadded[i * 2 + 1] = X[i];
+    }
+    cudaMalloc(&cublasXPadded, sizeof(float) * N * 2);
+    cudaMemcpy(cublasXPadded + N, xPadded, sizeof(float) * N * 2, cudaMemcpyHostToDevice);
+//    delete[] xPadded;
+
+//    float* xPadded = new float[N * 2];
+//    cudaMemcpy(xPadded, cublasXPadded, sizeof(float) * N * 2, cudaMemcpyDeviceToHost);
+    std::cout << "X Padded:";
+    for (int i = 0; i < N * 2; i++) {
+        std::cout << ' ' << xPadded[i];
+    }
+    std::cout << '\n';
+
+    std::cout << "Params:";
+    for (int i = 0; i < 2; i++) {
+        std::cout << ' ' << params[i];
+    }
+    std::cout << '\n';
+
+    // Perform the prediction calculation
+    float *cublasParams, *cublasMatMul;
+    const float alpha = 1.0f; const float beta = 1.0f;
+    cudaMalloc(&cublasParams, sizeof(float) * 2);
+    cudaMalloc(&cublasMatMul, sizeof(float) * N);
+    cudaMemcpy(cublasParams, params, sizeof(float) * 2, cudaMemcpyHostToDevice);
+    cublasHandle_t handle = 0;
+    cublasCreate(&handle);
+    cublasSgemm(
+            handle,
+            CUBLAS_OP_N, CUBLAS_OP_N,
+            1, N, 2,
+            &alpha,
+            cublasParams, 2,
+            cublasXPadded, N,
+            &beta,
+            cublasMatMul, 1
+    );
+
+    float *matMul = new float[N];
+    cudaMemcpy(matMul, cublasMatMul, sizeof(float) * N, cudaMemcpyHostToDevice);
+    std::cout << "MatMul:";
+    for (int i = 0; i < N; i++) {
+        std::cout << ' ' << matMul[i];
+    }
+    std::cout << '\n';
 }
 
 int main()
@@ -267,4 +296,5 @@ int main()
     X[0] = 1; X[1] = 2; X[2] = 3;
     y[0] = 7; y[1] = 8; y[2] = 9;
     linearRegressorFit(X, y, params, 3);
+    linearRegressorPredict(X, params, 3);
 }
