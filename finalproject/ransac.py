@@ -36,18 +36,25 @@ def _fit(M, X, Y):
     A = np.empty((2 * n, 9), dtype=np.float32)
 
     for i in range(n):
-        x = Y[i]
-        x[2] = 1
-        x1 = Y[i][0]
-        y1 = Y[i][1]
-        a = np.array((-x1*x1, -x1*y1, -x1))
-        b = np.array((-y1*x1, -y1*y1, -y1))
+        x1, y1, _ = X[i]
+        x1p, y1p, _ = Y[i]
+        a = np.array((-x1*x1p, -x1p*y1, -x1p))
+        b = np.array((-y1p*x1, -y1p*y1, -y1p))
         A[2 * i] = np.hstack((X[i], z, a))
         A[2 * i + 1] = np.hstack((z, X[i], b))
 
+        # x = Y[i]
+        # x[2] = 1
+        # x1 = Y[i][0]
+        # y1 = Y[i][1]
+        # a = np.array((-x1*x1, -x1*y1, -x1))
+        # b = np.array((-y1*x1, -y1*y1, -y1))
+        # A[2 * i] = np.hstack((X[i], z, a))
+        # A[2 * i + 1] = np.hstack((z, X[i], b))
+
     # solve for h
     _, _, V = np.linalg.svd(A)
-    h = V[-1]
+    h = V[-1] # selects largest value
     M = h.reshape((3, 3))
 
     return M_truth
