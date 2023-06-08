@@ -1,13 +1,12 @@
 import os
 import sys
+from tqdm import tqdm
 import numpy as np
 
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 
 
-# TODO: actually implement this, dont just return M_truth
-M_truth = np.load(PATH + "/data/M.npy")
 def _fit(M, X, Y):
     """Fits a homography matrix to the given points
 
@@ -36,21 +35,18 @@ def _fit(M, X, Y):
     A = np.empty((2 * n, 9), dtype=np.float32)
 
     for i in range(n):
-        x = Y[i]
-        x[2] = 1
-        x1 = Y[i][0]
-        y1 = Y[i][1]
-        a = np.array((-x1*x1, -x1*y1, -x1))
-        b = np.array((-y1*x1, -y1*y1, -y1))
+        x1, y1, _ = X[i]
+        x1p, y1p, _ = Y[i]
+        a = np.array((-x1*x1p, -x1p*y1, -x1p))
+        b = np.array((-y1p*x1, -y1p*y1, -y1p))
         A[2 * i] = np.hstack((X[i], z, a))
         A[2 * i + 1] = np.hstack((z, X[i], b))
 
     # solve for h
     _, _, V = np.linalg.svd(A)
-    h = V[-1]
+    h = V[-1] # selects vector with smallest eigenvalue value
     M = h.reshape((3, 3))
-
-    return M_truth
+    return M
 
 
 def _calc_error(M: np.ndarray, src_pts: np.ndarray, dst_pts: np.ndarray) -> float:
@@ -71,9 +67,8 @@ def _threshold(
 ):
     """Writes to threshold_mask in place
     """
-    threshold_mask_temp[inds] = (
-        _calc_error(M, src_pts[inds], dst_pts[inds]) < threshold_val
-    )
+    temp = src_pts[inds] @ M.T
+    threshold_mask_temp[inds] = np.sum((temp/temp[:,2][:,None] - dst_pts[inds])**2, axis=1) / dst_pts.shape[0] < threshold_val
 
 
 def ransac(
@@ -119,7 +114,7 @@ def ransac(
     best_error = np.inf
     best_model = None
 
-    for _ in range(max_iter):
+    for _ in tqdm(range(max_iter)):
         inds = np.random.choice(N, n_data_pts, replace=False)
         M = _fit(M, src_pts[inds], dst_pts[inds])
 
