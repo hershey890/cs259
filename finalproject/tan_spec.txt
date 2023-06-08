@@ -1,3 +1,0 @@
-- write a C++ func to read ./data/ransac_wikipedia*.bin into float32 arrays
-- the number (ie 69 or 2) indicates the length of the file
-- integrate into ransac.cu that ricky is working on
