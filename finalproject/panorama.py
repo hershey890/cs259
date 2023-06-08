@@ -158,7 +158,7 @@ def _find_homography(
                 f.write(M.tobytes())
                 
     elif ransac_method == 'cuda':
-        mask = ransac(src_pts, dst_pts, ransac_reproj_thresh, pts_bytes, max_iter=10000)
+        mask = ransac(src_pts, dst_pts, ransac_reproj_thresh, pts_bytes, max_iter=ransac_max_iter)
         src_pts = src_pts[mask[:, 0] == 1]
         dst_pts = dst_pts[mask[:, 0] == 1]
         M, _ = cv2.findHomography(src_pts, dst_pts, 0, ransac_reproj_thresh) # without RANSAC
@@ -214,6 +214,7 @@ def main(data_folder: str | Path, ransac_method: str, ransac_reproj_thresh: floa
     # plt.subplot(122)
     # plt.imshow(img_right[:,:,::-1])
     # plt.show()
+    plt.figure(figsize=(10, 20))
 
     # Detect keypoints and find matches between keypoints
     kp_left, kp_right, good_matches = _find_matches(img_left, img_right)
@@ -235,6 +236,10 @@ def main(data_folder: str | Path, ransac_method: str, ransac_reproj_thresh: floa
     dst = cv2.warpPerspective(img_right, M, (img_right.shape[1] + img_left.shape[1], img_right.shape[0]))
     dst[0:img_right.shape[0], 0:img_right.shape[1]] = img_left
     _plot(data_folder, 413, dst, mode, 'output_3_stitched.jpg')
+    
+    # save plot
+    if mode == 'save':
+        plt.savefig(data_folder + '/data/output_4_stitched.jpg')
 
 
 if __name__ == '__main__':
