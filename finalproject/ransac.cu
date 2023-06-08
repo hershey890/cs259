@@ -126,11 +126,11 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t X_len) {
     cudaMemcpy(cublasXPadded + X_len, X, sizeof(float) * X_len, cudaMemcpyHostToDevice);
     delete[] ones;
 
-    std::cout << "y:";
-    for (int i = 0; i < X_len; i++) {
-        std::cout << ' ' << y[i];
-    }
-    std::cout << '\n';
+//    std::cout << "y:";
+//    for (int i = 0; i < X_len; i++) {
+//        std::cout << ' ' << y[i];
+//    }
+//    std::cout << '\n';
 
 //    float *padded = new float[X_len * 2];
 //    cudaMemcpy(padded, cublasXPadded, sizeof(float) * X_len * 2, cudaMemcpyDeviceToHost);
@@ -228,6 +228,22 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t X_len) {
 //        std::cout << ' ' << matMul3[i];
 //    }
 //    std::cout << '\n';
+
+    cudaMemcpy(params, cublasMatMul3, sizeof(float) * 2, cudaMemcpyDeviceToHost);
+
+    // Deletes
+    delete srcMatrix[0];
+    delete dstMatrix[0];
+    delete srcMatrix;
+    delete dstMatrix;
+
+    // Cuda Frees
+    cudaFree(cublasXPadded);
+    cudaFree(cublasMatMul1);
+    cudaFree(cublasMatMul2);
+    cudaFree(cublasMatMul3);
+    cudaFree(cublasY);
+    cudaFree(cublasInverseMat);
 }
 
 int main()
@@ -247,7 +263,7 @@ int main()
     float *X, *y, *params;
     X = new float[3];
     y = new float[3];
-    params = nullptr;
+    params = new float[2];
     X[0] = 1; X[1] = 2; X[2] = 3;
     y[0] = 7; y[1] = 8; y[2] = 9;
     linearRegressorFit(X, y, params, 3);
