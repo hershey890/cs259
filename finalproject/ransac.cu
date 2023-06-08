@@ -222,22 +222,21 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t N) {
 }
 
 void linearRegressorPredict(float* X, float* params, uint32_t N) {
-    // Pad X in column major with ones
+    // Pad X on the top with ones
     float *cublasXPadded;
-    float *xPadded = new float[N * 2];
-    for (int i = 0; i < N; i++) {
-        xPadded[i * 2] = 1.0f;
-        xPadded[i * 2 + 1] = X[i];
-    }
+    float *ones = new float[N];
+    for (int i = 0; i < N; i++)
+        ones[i] = 1.0f;
     cudaMalloc(&cublasXPadded, sizeof(float) * N * 2);
-    cudaMemcpy(cublasXPadded + N, xPadded, sizeof(float) * N * 2, cudaMemcpyHostToDevice);
-//    delete[] xPadded;
+    cudaMemcpy(cublasXPadded, ones, sizeof(float) * N, cudaMemcpyHostToDevice);
+    cudaMemcpy(cublasXPadded + N, X, sizeof(float) * N, cudaMemcpyHostToDevice);
+    delete[] ones;
 
-//    float* xPadded = new float[N * 2];
-//    cudaMemcpy(xPadded, cublasXPadded, sizeof(float) * N * 2, cudaMemcpyDeviceToHost);
-    std::cout << "X Padded:";
+    float *padded = new float[N * 2];
+    cudaMemcpy(padded, cublasXPadded, sizeof(float) * N * 2, cudaMemcpyDeviceToHost);
+    std::cout << "Padded:";
     for (int i = 0; i < N * 2; i++) {
-        std::cout << ' ' << xPadded[i];
+        std::cout << ' ' << padded[i];
     }
     std::cout << '\n';
 
@@ -253,21 +252,22 @@ void linearRegressorPredict(float* X, float* params, uint32_t N) {
     cudaMalloc(&cublasParams, sizeof(float) * 2);
     cudaMalloc(&cublasMatMul, sizeof(float) * N);
     cudaMemcpy(cublasParams, params, sizeof(float) * 2, cudaMemcpyHostToDevice);
+    cudaMemset(cublasMatMul, 0, sizeof(float) * N);
     cublasHandle_t handle = 0;
     cublasCreate(&handle);
     cublasSgemm(
             handle,
-            CUBLAS_OP_N, CUBLAS_OP_N,
+            CUBLAS_OP_N, CUBLAS_OP_T,
             1, N, 2,
             &alpha,
-            cublasParams, 2,
+            cublasParams, 1,
             cublasXPadded, N,
             &beta,
             cublasMatMul, 1
     );
 
     float *matMul = new float[N];
-    cudaMemcpy(matMul, cublasMatMul, sizeof(float) * N, cudaMemcpyHostToDevice);
+    cudaMemcpy(matMul, cublasMatMul, sizeof(float) * N, cudaMemcpyDeviceToHost);
     std::cout << "MatMul:";
     for (int i = 0; i < N; i++) {
         std::cout << ' ' << matMul[i];
