@@ -57,7 +57,8 @@ def _fit(M, X, Y):
     h = V[-1] # selects vector with smallest eigenvalue value
     M = h.reshape((3, 3))
 
-    return M_truth
+    # return M_truth
+    return M
 
 
 def _calc_error(M: np.ndarray, src_pts: np.ndarray, dst_pts: np.ndarray) -> float:
