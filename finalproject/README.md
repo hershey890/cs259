@@ -15,3 +15,9 @@ TODO:
 -----
 - add a method of setting cuda or opencv method from the main() function
 - code vanilla RANSAC in python
+
+M/h Truth Value
+---------------
+0.6, 0.02, 514.0
+-0.14 -0.88 41.4
+0 0 1

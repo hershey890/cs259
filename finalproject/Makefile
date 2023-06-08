@@ -10,8 +10,8 @@ HEADERS = -I $(INCLUDE_FOLDER)
 ransac_img: ransac_img.o
 	$(CC) $(CFLAGS) -o ransac_img ransac_img.o $(LDLIBS)
 
-ransac_img.o: ransac_img.cu ../cuda_common.h
-	$(CC) $(CFLAGS) -c ransac_img.cu -I ../cuda_common.h $(HEADERS)
+ransac_img.o: ransac_img.cu
+	$(CC) $(CFLAGS) -c ransac_img.cu $(HEADERS)
 
 test: test.o
 	$(CC) $(CFLAGS) -o test test.o $(LDLIBS)
