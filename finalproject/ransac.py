@@ -54,7 +54,7 @@ def _fit(M, X, Y):
 
     # solve for h
     _, _, V = np.linalg.svd(A)
-    h = V[-1] # selects largest value
+    h = V[-1] # selects vector with smallest eigenvalue value
     M = h.reshape((3, 3))
 
     return M_truth
