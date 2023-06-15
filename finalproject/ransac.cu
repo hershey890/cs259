@@ -217,7 +217,7 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t N) {
     cudaFree(cublasY);
     cudaFree(cublasInverseMat);
 
-    // Cublas destroy handle
+    // Cublas Destroy Handle
     cublasDestroy(handle);
 }
 
@@ -232,19 +232,19 @@ void linearRegressorPredict(float* X, float* params, uint32_t N) {
     cudaMemcpy(cublasXPadded + N, X, sizeof(float) * N, cudaMemcpyHostToDevice);
     delete[] ones;
 
-    float *padded = new float[N * 2];
-    cudaMemcpy(padded, cublasXPadded, sizeof(float) * N * 2, cudaMemcpyDeviceToHost);
-    std::cout << "Padded:";
-    for (int i = 0; i < N * 2; i++) {
-        std::cout << ' ' << padded[i];
-    }
-    std::cout << '\n';
-
-    std::cout << "Params:";
-    for (int i = 0; i < 2; i++) {
-        std::cout << ' ' << params[i];
-    }
-    std::cout << '\n';
+//    float *padded = new float[N * 2];
+//    cudaMemcpy(padded, cublasXPadded, sizeof(float) * N * 2, cudaMemcpyDeviceToHost);
+//    std::cout << "Padded:";
+//    for (int i = 0; i < N * 2; i++) {
+//        std::cout << ' ' << padded[i];
+//    }
+//    std::cout << '\n';
+//
+//    std::cout << "Params:";
+//    for (int i = 0; i < 2; i++) {
+//        std::cout << ' ' << params[i];
+//    }
+//    std::cout << '\n';
 
     // Perform the prediction calculation
     float *cublasParams, *cublasMatMul;
@@ -266,13 +266,21 @@ void linearRegressorPredict(float* X, float* params, uint32_t N) {
             cublasMatMul, 1
     );
 
-    float *matMul = new float[N];
-    cudaMemcpy(matMul, cublasMatMul, sizeof(float) * N, cudaMemcpyDeviceToHost);
-    std::cout << "MatMul:";
-    for (int i = 0; i < N; i++) {
-        std::cout << ' ' << matMul[i];
-    }
-    std::cout << '\n';
+//    float *matMul = new float[N];
+//    cudaMemcpy(matMul, cublasMatMul, sizeof(float) * N, cudaMemcpyDeviceToHost);
+//    std::cout << "MatMul:";
+//    for (int i = 0; i < N; i++) {
+//        std::cout << ' ' << matMul[i];
+//    }
+//    std::cout << '\n';
+
+    // Cuda Frees
+    cudaFree(cublasXPadded);
+    cudaFree(cublasParams);
+    cudaFree(cublasMatMul);
+
+    // Cublas Destroy Handle
+    cublasDestroy(handle);
 }
 
 int main()
