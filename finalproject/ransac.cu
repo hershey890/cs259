@@ -1,6 +1,23 @@
-#include <iostream>
-#include <fstream>
+#include <boost/asio.hpp>
+#include <boost/asio/thread_pool.hpp>
+#include <boost/assert.hpp>
+#include <boost/bind/bind.hpp>
+#include <boost/iterator/permutation_iterator.hpp>
+#include <cmath>
 #include <cublas_v2.h>
+#include <fstream>
+#include <iostream>
+#include <limits.h>
+#include <numeric>
+#include <random>
+
+#define LIN_REG_PARAMS_DIM 2
+#define THREAD_COUNT 1
+
+struct RansacFitResult {
+    float error;
+    float params[LIN_REG_PARAMS_DIM];
+};
 
 void readPtsFile(std::string filename, float** src, float** dst, uint32_t* n_bytes) {
     std::ifstream stream(filename, std::ios::in | std::ios::binary);
@@ -176,6 +193,7 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t N) {
 //        std::cout << ' ' << matMul2[i];
 //    }
 //    std::cout << '\n';
+//    delete matMul2;
 
     // Multiply (inverse(X.T x X) by X.T) by y
     float *cublasY, *cublasMatMul3;
@@ -200,6 +218,7 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t N) {
 //        std::cout << ' ' << matMul3[i];
 //    }
 //    std::cout << '\n';
+//    delete matMaul3;
 
     cudaMemcpy(params, cublasMatMul3, sizeof(float) * 2, cudaMemcpyDeviceToHost);
 
@@ -221,7 +240,7 @@ void linearRegressorFit(float* X, float* y, float* params, uint32_t N) {
     cublasDestroy(handle);
 }
 
-void linearRegressorPredict(float* X, float* params, uint32_t N) {
+void linearRegressorPredict(float* X, float* params, float* result, uint32_t N) {
     // Pad X on the top with ones
     float *cublasXPadded;
     float *ones = new float[N];
@@ -239,7 +258,8 @@ void linearRegressorPredict(float* X, float* params, uint32_t N) {
 //        std::cout << ' ' << padded[i];
 //    }
 //    std::cout << '\n';
-//
+//    delete padded;
+
 //    std::cout << "Params:";
 //    for (int i = 0; i < 2; i++) {
 //        std::cout << ' ' << params[i];
@@ -273,6 +293,9 @@ void linearRegressorPredict(float* X, float* params, uint32_t N) {
 //        std::cout << ' ' << matMul[i];
 //    }
 //    std::cout << '\n';
+//    delete matMul;
+
+    cudaMemcpy(result, cublasMatMul, sizeof(float) * N, cudaMemcpyDeviceToHost);
 
     // Cuda Frees
     cudaFree(cublasXPadded);
@@ -281,6 +304,122 @@ void linearRegressorPredict(float* X, float* params, uint32_t N) {
 
     // Cublas Destroy Handle
     cublasDestroy(handle);
+}
+
+// Assumes that LinReg Fit+Predict is used.
+// Assumes that metric is (y_hat - y)^2.
+// TODO: Tan - maybe we can parallelize the for loop body?
+void ransacKernel(const float* const X, const float* const y, const uint n, const float t, const uint d, const uint N, RansacFitResult* const fitResult) {
+    // Generate random indices to use - Boost uses std under the hood.
+    std::vector<unsigned int> indices(N);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(indices.begin(), indices.end(), g);
+
+
+    // Set the X and y according to randomly sampled indices
+    float* XLin = new float[n];
+    float* yLin = new float[n];
+    for (int i = 0; i < n; i++) {
+        XLin[i] = X[indices[i]];
+        yLin[i] = y[indices[i]];
+    }
+    float *initialParams = new float[LIN_REG_PARAMS_DIM];
+
+    // Fit the linear regressor to our model
+    linearRegressorFit(XLin, yLin, initialParams, n);
+
+    // Perform prediction
+    float* yLinPred = new float[n];
+    linearRegressorPredict(XLin, initialParams, yLinPred, n);
+
+    // Delete array
+    delete initialParams;
+
+    // Get thresholded indices
+    std::vector<float> XLinThreshold;
+    std::vector<float> yLinThreshold;
+    for (int i = 0; i < n; i++) {
+        // Check to see if square error loss is below the set threshold, (if so, include as inlier point)
+        if (pow(yLin[i] - yLinPred[i], 2) < t) {
+            XLinThreshold.push_back(XLin[i]);
+            yLinThreshold.push_back(yLin[i]);
+        }
+    }
+
+    // Delete arrays
+    delete XLin;
+    delete yLin;
+    delete yLinPred;
+
+    // Sanity check assertion that dimensions match between X and y inliers and get the count
+    BOOST_ASSERT(XLinThreshold.size() == yLinThreshold.size());
+    const uint numInliers = XLinThreshold.size();
+
+    // Number of inlier points is too low so we discard this from consideration
+    if (numInliers <= d) {
+        fitResult->error = std::numeric_limits<float>::max();
+        return;
+    }
+
+    // Create a model on the inliers & set the params
+    linearRegressorFit(&XLinThreshold[0], &yLinThreshold[0], fitResult->params, numInliers);
+
+    // Form a prediction from the inliers
+    float* yLinThresholdPred = new float[numInliers];
+    linearRegressorPredict(&XLinThreshold[0], fitResult->params, yLinThresholdPred, numInliers);
+
+    // Compute the mean squared error
+    float squareErrorAccumulator = 0;
+    for (int i = 0; i < numInliers; i++) {
+        squareErrorAccumulator += pow(yLinThresholdPred[i] - yLinThreshold[i], 2);
+    }
+
+    // Set the error
+    fitResult->error = squareErrorAccumulator / numInliers;
+
+    // Delete array
+    delete yLinThresholdPred;
+}
+
+/**
+ * Perform ransac fit using Linear Regression Fit and Predict as model and square difference as metric.
+ * @param X 1-d X array
+ * @param y 1-d y array
+ * @param n Minimum number of data points to estimate parameters
+ * @param k Maximum iterations allowed
+ * @param t Threshold value to determine if points are fit well
+ * @param d Number of close data points required to assert model fits well
+ * @param N Length of X & y
+ * @param bestFitResult the best fit result (measured by lowest loss) returned by RANSAC
+ */
+void ransacFit(float* X, float* y, uint n, uint k, float t, uint d, uint N, RansacFitResult* bestFitResult) {
+    boost::asio::thread_pool pool(THREAD_COUNT);
+    RansacFitResult* fitResults = new RansacFitResult[k];
+    for (int i = 0; i < k; i++) {
+        boost::asio::post(
+            pool,
+            boost::bind(
+                ransacKernel,
+                X, y, n, t, d, N, fitResults + i
+            )
+        );
+    }
+
+    pool.join();
+
+    bestFitResult->error = std::numeric_limits<float>::max();
+    for (int i = 0; i < k; i++) {
+        if (fitResults[i].error < bestFitResult->error) {
+            bestFitResult->error = fitResults[i].error;
+            for (int j = 0; j < LIN_REG_PARAMS_DIM; j++) {
+                bestFitResult->params[j] = fitResults[i].params[j];
+            }
+        }
+    }
+
+    delete fitResults;
 }
 
 int main()
@@ -297,12 +436,49 @@ int main()
 //    inv_src[0][0] = inv_src[0][4] = inv_src[0][8] = 2.0f;
 //    invert(inv_src, inv_dst, 3, 1);
 
-    float *X, *y, *params;
-    X = new float[3];
-    y = new float[3];
-    params = new float[2];
+    const uint N = 3;
+    float *X, *y;
+    X = new float[N];
+    y = new float[N];
     X[0] = 1; X[1] = 2; X[2] = 3;
     y[0] = 7; y[1] = 8; y[2] = 9;
-    linearRegressorFit(X, y, params, 3);
-    linearRegressorPredict(X, params, 3);
+//    float *params, *result;
+//    params = new float[LIN_REG_PARAMS_DIM];
+//    result = new float[N];
+//    linearRegressorFit(X, y, params, N);
+//    linearRegressorPredict(X, params, result, N);
+//
+//    std::cout << "X:";
+//    for (int i = 0; i < N; i++)
+//        std::cout << ' ' << X[i];
+//    std::cout << '\n';
+//
+//    std::cout << "y:";
+//    for (int i = 0; i < N; i++)
+//        std::cout << ' ' << y[i];
+//    std::cout << '\n';
+//
+//    std::cout << "params:";
+//    for (int i = 0; i < 2; i++)
+//        std::cout << ' ' << params[i];
+//    std::cout << '\n';
+//
+//    std::cout << "result:";
+//    for (int i = 0; i < N; i++)
+//        std::cout << ' ' << result[i];
+//    std::cout << '\n';
+//
+//    delete params;
+//    delete result;
+
+    RansacFitResult bestFitResult;
+    ransacFit(
+        X, y, 3, 10, std::numeric_limits<float>::max(), 0, 3, &bestFitResult
+    );
+
+    std::cout << "Params: (" << bestFitResult.params[0] << ',' << bestFitResult.params[1] << ")\n";
+    std::cout << "MSE: " << bestFitResult.error << '\n';
+
+    delete X;
+    delete y;
 }
