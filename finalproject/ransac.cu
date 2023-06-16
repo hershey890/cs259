@@ -72,6 +72,13 @@ void invert(float** src, float** dst, int n, int batchSize)
         {
             fprintf(stderr, "Factorization of matrix %d Failed: Matrix may be singular\n", i);
             cudaDeviceReset();
+            std::cout << "Matrix:";
+            for (int r = 0; r < n; r++) {
+                for (int c = 0; c < n; c++) {
+                    std::cout << ' ' << src[i][r * n + c];
+                }
+            }
+            std::cout << '\n';
             exit(EXIT_FAILURE);
         }
 
@@ -424,9 +431,9 @@ void ransacFit(float* X, float* y, uint n, uint k, float t, uint d, uint N, Rans
 
 int main()
 {
-    float *src, *dst;
+    float *X, *y;
     uint32_t n_bytes;
-    readPtsFile("./data/src_dst_pts.bin", &src, &dst, &n_bytes);
+    readPtsFile("./data/src_dst_pts.bin", &X, &y, &n_bytes);
 
 //    float **inv_src, **inv_dst;
 //    inv_src = new float*[1];
@@ -436,12 +443,6 @@ int main()
 //    inv_src[0][0] = inv_src[0][4] = inv_src[0][8] = 2.0f;
 //    invert(inv_src, inv_dst, 3, 1);
 
-    const uint N = 3;
-    float *X, *y;
-    X = new float[N];
-    y = new float[N];
-    X[0] = 1; X[1] = 2; X[2] = 3;
-    y[0] = 7; y[1] = 8; y[2] = 9;
 //    float *params, *result;
 //    params = new float[LIN_REG_PARAMS_DIM];
 //    result = new float[N];
@@ -471,9 +472,14 @@ int main()
 //    delete params;
 //    delete result;
 
+    const int N = (int) (n_bytes / sizeof(float)); // Number of X/y data points
+    const int n = 100; // Minimum number of data points to estimate parameters
+    const int k = 10000; // Maximum number of iterations allowed
+    const float t = 10.0; // Threshold value to determine if points are fit well
+    const int d = 80; // Number of close data points required to assert model fits
     RansacFitResult bestFitResult;
     ransacFit(
-        X, y, 3, 10, std::numeric_limits<float>::max(), 0, 3, &bestFitResult
+        X, y, n, k, t, d, N, &bestFitResult
     );
 
     std::cout << "Params: (" << bestFitResult.params[0] << ',' << bestFitResult.params[1] << ")\n";
