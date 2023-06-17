@@ -86,9 +86,10 @@ def main():
     regressor.fit(X, y)
     model = regressor.best_fit.params
     print(model.shape)
-    with open('./data/ransac_wikipedia_model_2_float32_vals.bin', 'wb') as f:
-        model = model.astype(np.float32)
-        f.write(model.tobytes())
+    print(model)
+    # with open('./data/ransac_wikipedia_model_2_float32_vals.bin', 'wb') as f:
+        # model = model.astype(np.float32)
+        # f.write(model.tobytes())
 
     fig, ax = plt.subplots(1, 1)
     ax.set_box_aspect(1)

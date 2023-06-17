@@ -12,7 +12,7 @@
 #include <random>
 
 #define LIN_REG_PARAMS_DIM 2
-#define THREAD_COUNT 1
+#define THREAD_COUNT 12
 
 struct RansacFitResult {
     double error;
@@ -371,13 +371,9 @@ int main() {
     double y[n_elements] = {
         -0.917,-0.833,-0.801,-0.665,-0.605,-0.545,-0.509,-0.433,-0.397,-0.281,-0.205,-0.169,-0.0531,-0.0651,0.0349,0.0829,0.0589,0.175,0.179,0.191,0.259,0.287,0.359,0.395,0.483,0.539,0.543,0.603,0.667,0.679,0.751,0.803,-0.265,-0.341,0.111,-0.113,0.547,0.791,0.551,0.347,0.975,0.943,-0.249,-0.769,-0.625,-0.861,-0.749,-0.945,-0.493,0.163,-0.469,0.0669,0.891,0.623,-0.609,-0.677,-0.721,-0.745,-0.885,-0.897,-0.969,-0.949,0.707,0.783,0.859,0.979,0.811,0.891,-0.137
     };
-    std::cout << "Input pairs:\n";
-    for (int i = 0; i < n_elements; i++) {
-        std::cout << '(' << X[i] << ',' << y[i] << ")\n";
-    }
 
     const int n = 10; // Minimum number of data points to estimate parameters
-    const int k = 100; // Maximum number of iterations allowed
+    const int k = 1000; // Maximum number of iterations allowed
     const double t = 0.05; // Threshold value to determine if points are fit well
     const int d = 10; // Number of close data points required to assert model fits
     RansacFitResult bestFitResult;
