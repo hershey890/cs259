@@ -28,24 +28,26 @@ def _fit(M, X, Y):
     ---------
     http://6.869.csail.mit.edu/fa12/lectures/lecture13ransac/lecture13ransac.pdf slide 19
     """
-    h = np.empty((9, 1), dtype=np.float32)
-    z = np.zeros(3, dtype=np.float32)
+    # h = np.empty((9, 1), dtype=np.float32)
+    # z = np.zeros(3, dtype=np.float32)
 
-    n = X.shape[0]
-    A = np.empty((2 * n, 9), dtype=np.float32)
+    # n = X.shape[0]
+    # A = np.empty((2 * n, 9), dtype=np.float32)
 
-    for i in range(n):
-        x1, y1, _ = X[i]
-        x1p, y1p, _ = Y[i]
-        a = np.array((-x1*x1p, -x1p*y1, -x1p))
-        b = np.array((-y1p*x1, -y1p*y1, -y1p))
-        A[2 * i] = np.hstack((X[i], z, a))
-        A[2 * i + 1] = np.hstack((z, X[i], b))
+    # for i in range(n):
+    #     x1, y1, _ = X[i]
+    #     x1p, y1p, _ = Y[i]
+    #     a = np.array((-x1*x1p, -x1p*y1, -x1p))
+    #     b = np.array((-y1p*x1, -y1p*y1, -y1p))
+    #     A[2 * i] = np.hstack((X[i], z, a))
+    #     A[2 * i + 1] = np.hstack((z, X[i], b))
 
-    # solve for h
-    _, _, V = np.linalg.svd(A)
-    h = V[-1] # selects vector with smallest eigenvalue value
-    M = h.reshape((3, 3))
+    # # solve for h
+    # _, _, V = np.linalg.svd(A)
+    # h = V[-1] # selects vector with smallest eigenvalue value
+    # M = h.reshape((3, 3))
+    # return M
+    M = np.load(PATH + "/data/M.npy")
     return M
 
 
