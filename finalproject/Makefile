@@ -7,6 +7,12 @@ HEADERS = -I $(INCLUDE_FOLDER)
 # -I ~/projects/ucla/cs259/
 # -I /usr/local/cuda/samples/common/inc -I /usr/local/cuda/include/cudnn.h
 
+ransac: ransac.o
+	$(CC) $(CFLAGS) -o ransac ransac.o $(LDLIBS)
+
+ransac.o: ransac.cu
+	$(CC) $(CFLAGS) -c ransac.cu $(HEADERS)
+
 ransac_img: ransac_img.o
 	$(CC) $(CFLAGS) -o ransac_img ransac_img.o $(LDLIBS)
 
