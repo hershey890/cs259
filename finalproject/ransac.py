@@ -71,7 +71,7 @@ def _threshold(
     """
     temp = src_pts[inds] @ M.T
     threshold_mask_temp[inds] = np.sum((temp/temp[:,2][:,None] - dst_pts[inds])**2, axis=1) / dst_pts.shape[0] < threshold_val
-
+    
 
 def ransac(
     src_pts: np.ndarray, dst_pts: np.ndarray, reproj_thresh: float, pts_bytes: bytes, max_iter: int = 10000, 
@@ -122,6 +122,8 @@ def ransac(
 
         # calcualte the loss for each point
         inlier_mask_temp.fill(0)
+        print(src_pts)
+        print(dst_pts)
         _threshold(inlier_mask_temp, inds, M, src_pts, dst_pts, reproj_thresh)
 
         if inlier_mask_temp.sum() >= n_valid_data_pts:
