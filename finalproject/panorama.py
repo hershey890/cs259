@@ -81,6 +81,13 @@ def _create_array_str(src_pts: np.ndarray, dst_pts: np.ndarray) -> bytes:
     return n_bytes_bytes + src_pts_bytes + dst_pts_bytes
 
 
+def _read_array_str(array_str: bytes) -> Tuple[np.ndarray, np.ndarray]:
+    n_bytes = int.from_bytes(array_str[:4], byteorder='little')
+    src_pts = np.frombuffer(array_str[4:4+n_bytes], dtype='<f')
+    dst_pts = np.frombuffer(array_str[4+n_bytes:], dtype='<f')
+    return src_pts.reshape(-1, 2), dst_pts.reshape(-1, 2)
+
+
 def _find_matches(img_left, img_right) -> Tuple[Tuple[cv2.KeyPoint], Tuple[cv2.KeyPoint], List[cv2.DMatch]]:
     """OpenCV Code
     """
@@ -122,7 +129,7 @@ def _find_homography(
         keypoints from image 2
     good_matches : List[cv2.DMatch]
         list of good matches between keypoints from image 1 and image 2
-    ransac_method : {'opencv', 'cuda'}
+    ransac_method : {'opencv', 'cuda', 'python'}
         method to use for RANSAC
     write_values_to_file : bool
         if True, writes src_pts, dst_pts, and mask to file. Useful for development purposes.
@@ -157,13 +164,26 @@ def _find_homography(
             with open(PATH + '/data/M.bin', 'wb') as f:
                 f.write(M.tobytes())
                 
-    elif ransac_method == 'cuda':
+    elif ransac_method == 'python':
         mask = ransac(src_pts, dst_pts, ransac_reproj_thresh, pts_bytes, max_iter=ransac_max_iter)
         src_pts = src_pts[mask[:, 0] == 1]
         dst_pts = dst_pts[mask[:, 0] == 1]
         M, _ = cv2.findHomography(src_pts, dst_pts, 0, ransac_reproj_thresh) # without RANSAC
+    
+    elif ransac_method == 'cuda':
+        with open(PATH + '/data/src_dst_pts.bin', 'rb') as f:
+            pts_bytes = f.read()
+        src_pts, dst_pts = _read_array_str(pts_bytes)
+        
+        mask = np.genfromtxt(PATH + '/data/test.csv', delimiter=',')
+        mask = np.uint8(mask).reshape(-1, 1)
+        src_pts = src_pts[mask[:, 0] == 1]
+        dst_pts = dst_pts[mask[:, 0] == 1]
+        M, _ = cv2.findHomography(src_pts, dst_pts, 0, ransac_reproj_thresh) # without RANSAC
+    
     else:
-        raise ValueError('ransac_method must be one of {opencv, cuda}')
+        raise ValueError('ransac_method must be one of {opencv, cuda, python}')
+    
     assert mask.dtype == np.uint8
 
     if write_values_to_file:
@@ -175,11 +195,11 @@ def _find_homography(
     return M.astype(np.float32), mask[:, 0]
 
 
-def _plot(data_folder: str, subplot_idx: int, img: np.ndarray, mode: str, filename: str = None):
+def _plot(data_folder: str, subplot_idx: int, img: np.ndarray, mode: str, filename: str = None, title: str=None):
     """Plots or saves image depending on `mode`
     """
     if mode == 'plot':
-        plt.subplot(subplot_idx)
+        plt.subplot(subplot_idx, title=title)
         plt.imshow(img[:,:,::-1])
     elif mode == 'save':
         cv2.imwrite(data_folder + '/data/' + filename, img)
@@ -218,6 +238,9 @@ def main(data_folder: str | Path, ransac_method: str, ransac_reproj_thresh: floa
 
     # Detect keypoints and find matches between keypoints
     kp_left, kp_right, good_matches = _find_matches(img_left, img_right)
+    draw_params = dict(matchColor=(0, 255, 0), singlePointColor=None, flags=2)
+    img3 = cv2.drawMatches(img_left, kp_right, img_right, kp_left, good_matches, None, **draw_params)
+    _plot(data_folder, 411, img3, mode, 'output_0_rawmatches.jpg', 'Raw Matches')
 
     # find homography
     M, mask = _find_homography(kp_right, kp_left, good_matches, ransac_reproj_thresh, ransac_max_iter, ransac_method=ransac_method,  write_values_to_file=WRITE_VALUES_TO_FILE)
@@ -225,17 +248,17 @@ def main(data_folder: str | Path, ransac_method: str, ransac_reproj_thresh: floa
     pts = np.float32([[0, 0], [0, h-1], [w-1, h-1], [w-1, 0]]).reshape(-1, 1, 2)
     dst = cv2.perspectiveTransform(pts, M).astype(np.int32)
     img_right = cv2.polylines(img_right, [dst], True, 255, 3, cv2.LINE_AA)
-    _plot(data_folder, 411, img_right, mode, 'output_1_stitched.jpg')
+    _plot(data_folder, 412, img_right, mode, 'output_1_imgcrop.jpg', 'Crop of Right Image to be Used')
 
     # draw matches
     draw_params = dict(matchColor=(0, 255, 0), singlePointColor=None, matchesMask=mask, flags=2)
     img3 = cv2.drawMatches(img_left, kp_right, img_right, kp_left, good_matches, None, **draw_params)
-    _plot(data_folder, 412, img3, mode, 'output_2_matches.jpg')
+    _plot(data_folder, 413, img3, mode, 'output_2_goodmatches.jpg', 'RANSAC Filtered Matches')
 
     # stitch images
     dst = cv2.warpPerspective(img_right, M, (img_right.shape[1] + img_left.shape[1], img_right.shape[0]))
     dst[0:img_right.shape[0], 0:img_right.shape[1]] = img_left
-    _plot(data_folder, 413, dst, mode, 'output_3_stitched.jpg')
+    _plot(data_folder, 414, dst, mode, 'output_3_stitched.jpg', 'Final Stitched Image')
     
     # save plot
     if mode == 'save':
