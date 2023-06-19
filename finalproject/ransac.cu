@@ -3,6 +3,7 @@
 #include <boost/assert.hpp>
 #include <boost/bind/bind.hpp>
 #include <boost/iterator/permutation_iterator.hpp>
+#include <chrono>
 #include <cmath>
 #include <cublas_v2.h>
 #include <fstream>
@@ -32,7 +33,7 @@ void readPtsFile(std::string filename, double** src, double** dst, uint32_t* n_b
     stream.close();
 }
 
-void linearRegressorFit(double* X, double* y, double* params, uint32_t N) {
+void linearRegressorFit(cublasHandle_t& handle, double* X, double* y, double* params, uint32_t N) {
     // Pad X on the top with ones
     double *cublasXPadded;
     // TODO: make ones global later
@@ -63,8 +64,6 @@ void linearRegressorFit(double* X, double* y, double* params, uint32_t N) {
     const double alpha = 1.0f; const double beta = 0.0f;
     cudaMalloc(&cublasMatMul1, sizeof(double) * 4);
     cudaMemset(cublasMatMul1, 0, sizeof(double) * 4);
-    cublasHandle_t handle = 0;
-    cublasCreate(&handle);
     cublasDgemm(
             handle,
             CUBLAS_OP_T, CUBLAS_OP_N,
@@ -165,12 +164,9 @@ void linearRegressorFit(double* X, double* y, double* params, uint32_t N) {
     // Cuda Frees
     cudaFree(cublasMatMul3);
     cudaFree(cublasY);
-
-    // Cublas Destroy Handle
-    cublasDestroy(handle);
 }
 
-void linearRegressorPredict(double* X, double* params, double* result, uint32_t N) {
+void linearRegressorPredict(cublasHandle_t& handle, double* X, double* params, double* result, uint32_t N) {
     // Pad X on the top with ones
     double *cublasXPadded;
     double *ones = new double[N];
@@ -203,8 +199,6 @@ void linearRegressorPredict(double* X, double* params, double* result, uint32_t 
     cudaMalloc(&cublasMatMul, sizeof(double) * N);
     cudaMemcpy(cublasParams, params, sizeof(double) * 2, cudaMemcpyHostToDevice);
     cudaMemset(cublasMatMul, 0, sizeof(double) * N);
-    cublasHandle_t handle = 0;
-    cublasCreate(&handle);
     cublasDgemm(
             handle,
             CUBLAS_OP_N, CUBLAS_OP_T,
@@ -231,15 +225,12 @@ void linearRegressorPredict(double* X, double* params, double* result, uint32_t 
     cudaFree(cublasXPadded);
     cudaFree(cublasParams);
     cudaFree(cublasMatMul);
-
-    // Cublas Destroy Handle
-    cublasDestroy(handle);
 }
 
 // Assumes that LinReg Fit+Predict is used.
 // Assumes that metric is (y_hat - y)^2.
 // TODO: Tan - maybe we can parallelize the for loop body?
-void ransacKernel(const double* const X, const double* const y, const uint n, const double t, const uint d, const uint N, RansacFitResult* const fitResult) {
+void ransacKernel(cublasHandle_t& handle, const double* const X, const double* const y, const uint n, const double t, const uint d, const uint N, RansacFitResult* const fitResult) {
     // Generate random indices to use - Boost uses std under the hood.
     std::vector<unsigned int> indices(N);
     std::iota(indices.begin(), indices.end(), 0);
@@ -258,11 +249,11 @@ void ransacKernel(const double* const X, const double* const y, const uint n, co
     double *initialParams = new double[LIN_REG_PARAMS_DIM];
 
     // Fit the linear regressor to our model
-    linearRegressorFit(XLin, yLin, initialParams, n);
+    linearRegressorFit(handle, XLin, yLin, initialParams, n);
 
     // Perform prediction
     double* yLinPred = new double[n];
-    linearRegressorPredict(XLin, initialParams, yLinPred, n);
+    linearRegressorPredict(handle, XLin, initialParams, yLinPred, n);
 
     // Delete array
     delete initialParams;
@@ -295,11 +286,11 @@ void ransacKernel(const double* const X, const double* const y, const uint n, co
     }
 
     // Create a model on the inliers & set the params
-    linearRegressorFit(&XLinThreshold[0], &yLinThreshold[0], fitResult->params, numInliers);
+    linearRegressorFit(handle, &XLinThreshold[0], &yLinThreshold[0], fitResult->params, numInliers);
 
     // Form a prediction from the inliers
     double* yLinThresholdPred = new double[numInliers];
-    linearRegressorPredict(&XLinThreshold[0], fitResult->params, yLinThresholdPred, numInliers);
+    linearRegressorPredict(handle, &XLinThreshold[0], fitResult->params, yLinThresholdPred, numInliers);
 
     // Compute the mean squared error
     double squareErrorAccumulator = 0;
@@ -327,18 +318,21 @@ void ransacKernel(const double* const X, const double* const y, const uint n, co
  */
 void ransacFit(double* X, double* y, uint n, uint k, double t, uint d, uint N, RansacFitResult* bestFitResult) {
     boost::asio::thread_pool pool(THREAD_COUNT);
+    cublasHandle_t handle = 0;
     RansacFitResult* fitResults = new RansacFitResult[k];
+    cublasCreate(&handle);
     for (int i = 0; i < k; i++) {
         boost::asio::post(
             pool,
             boost::bind(
                 ransacKernel,
-                X, y, n, t, d, N, fitResults + i
+                handle, X, y, n, t, d, N, fitResults + i
             )
         );
     }
 
     pool.join();
+    cublasDestroy(handle);
 
     bestFitResult->error = std::numeric_limits<double>::max();
     for (int i = 0; i < k; i++) {
@@ -350,7 +344,7 @@ void ransacFit(double* X, double* y, uint n, uint k, double t, uint d, uint N, R
         }
     }
 
-    delete fitResults;
+    delete[] fitResults;
 }
 
 int main() {
@@ -373,13 +367,17 @@ int main() {
     };
 
     const int n = 10; // Minimum number of data points to estimate parameters
-    const int k = 1000; // Maximum number of iterations allowed
+    const int k = 10000; // Maximum number of iterations allowed
     const double t = 0.05; // Threshold value to determine if points are fit well
     const int d = 10; // Number of close data points required to assert model fits
     RansacFitResult bestFitResult;
+    const std::chrono::time_point<std::chrono::system_clock> startTime = std::chrono::system_clock::now();
     ransacFit(
         X, y, n, k, t, d, n_elements, &bestFitResult
     );
+    const std::chrono::time_point<std::chrono::system_clock> endTime = std::chrono::system_clock::now();
+    int64_t timeElapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime).count();
+    std::cout << "RANSAC 2D CUDA execution time in seconds: " << timeElapsedSeconds << '\n';
 
     std::cout << "Params: (" << bestFitResult.params[0] << ',' << bestFitResult.params[1] << ")\n";
     std::cout << "MSE: " << bestFitResult.error << '\n';
