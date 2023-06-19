@@ -18,6 +18,12 @@ Resources
 #include <random>
 #include <cmath>
 #include <algorithm>
+#include <chrono>
+#include <thread>
+#include <pthread.h>
+
+#define NUM_THREADS 8
+#define DATA_SIZE 1132 * 3
 
 class Points {
 public:
@@ -26,6 +32,22 @@ public:
     int n_points;
 };
 
+struct thread_data {
+    double* src_points;
+    double* dst_points;
+    double* cudaModel;
+    double* cudaX;
+    double* cudaY;
+    double* cudaMul;
+    bool* cudaMask;
+    double* cudaError;
+    int N;
+    int k;
+    double tval;
+    int i;
+    double best_error;
+    std::vector<bool>best_mask;
+};
 
 Points* readPtsFile(std::string filename) {
     std::ifstream stream(filename, std::ios::in | std::ios::binary);
@@ -99,47 +121,244 @@ __global__ void calc_error(
 
 }
 
-void ransac_fit(
-    double* src_points, 
-    double* dst_points, 
-    double* M, 
-    int N, 
-    int k, 
-    double tval,
-    std::vector<bool>& best_inlier_mask,
-    double& best_error
+// void ransac_fit(
+//     double* src_points, 
+//     double* dst_points, 
+//     double* M, 
+//     int N, 
+//     int k, 
+//     double tval,
+//     std::vector<bool>& best_inlier_mask,
+//     double& best_error
+// ){
+//     const int n_data_pts = 100, n_valid_data_pts = 80;
+//     std::vector<double> ones(N, 1);
+
+//     // send data to gpu
+//     double* cudaMul;
+//     double* cudaModel;
+//     double* cudaX;
+//     double* cudaY;
+//     double* cudaResult;
+//     double* cudaError;
+//     bool* cudaMask;
+
+//     cudaMalloc(&cudaModel, sizeof(double) * 9);
+//     cudaMalloc(&cudaResult, sizeof(double) * N * 3);
+//     cudaMalloc(&cudaMul, sizeof(double) * N * 3);
+//     cudaMalloc(&cudaX, sizeof(double) * N * 3);
+//     cudaMalloc(&cudaY, sizeof(double) * N * 3);
+//     cudaMalloc(&cudaMask, sizeof(bool) * N);
+//     cudaMalloc(&cudaError, sizeof(double) * N * 3);
+
+//     cudaMemcpy(cudaModel, M, sizeof(double) * 9, cudaMemcpyHostToDevice);
+
+//     std::vector<bool> inlier_mask(N, false);
+//     best_error = 1000000;
+//     //std::vector<bool> best_inlier_mask;
+
+//     cublasHandle_t handle = 0;
+//     cublasCreate(&handle);
+
+//     //coarse grain parallelize this
+//     for (int i = 0; i < k; i++){
+
+//         // sample src points
+//         std::vector<unsigned int> indices(N);
+//         std::iota(indices.begin(), indices.end(), 0);
+//         std::random_device rd;
+//         std::mt19937 g(rd());
+//         std::shuffle(indices.begin(), indices.end(), g);
+
+//         // indices = {1126,  960,  191,  588,  164,  939,  443,   57,  242,   64,   61,
+//         // 698,  185,  149,  442,    7,  390,  943, 1128, 1025,  864,  346,
+//         // 929,  705,  771, 1031,  944,  879,   52,  116,  827,  375,  379,
+//         // 782,  834,  146,  493,  795,  272,  123,  707,  427,  545, 1036,
+//         // 320,  152,  196,   80,  211,  665,  296,  975,  148,  486,  174,
+//         // 495,  810,  524,  546,   56,  784, 1108,  595,  201,  184,  585,
+//         // 854,  959,  227,  531,   70, 1130,  663,  985,  971,  586,  373,
+//         // 161,  783,  692,  741,  186,  421,  607,  883,  312, 1062,  690,
+//         // 257,  681,  979,  899,  989,   92,  279,  353,  452, 1066, 1043,
+//         // 54};
+
+//         // Set the X and y according to randomly sampled indices
+//         double* sampledX = new double[n_data_pts*3];
+//         double* sampledY = new double[n_data_pts*3];
+//         for (int j = 0; j < 3; j++){
+//             for (int i = 0; i < n_data_pts; i++) {
+//                 sampledX[j*n_data_pts + i] = src_points[j * N + indices[i]];
+//                 sampledY[j*n_data_pts +i] = dst_points[j * N + indices[i]];
+//                 // if (i < 3 || i > (n_data_pts-3)){
+//                 //     std::cout << sampledX[j*n_data_pts + i] << std::endl;
+//                 //     std::cout << sampledY[j*n_data_pts +i] << std::endl;
+//                 // }
+//             }
+//         }
+        
+//         // perform threshold check
+//         const double alpha = 1.0f; const double beta = 0.0f;
+
+//         cudaMemcpy(cudaX, sampledX, sizeof(double) * n_data_pts * 3, cudaMemcpyHostToDevice);
+//         cudaMemcpy(cudaY, sampledY, sizeof(double) * n_data_pts * 3, cudaMemcpyHostToDevice);
+
+//         //do matmul
+
+//         cublasDgemm(
+//             handle,
+//             CUBLAS_OP_N, CUBLAS_OP_T,
+//             n_data_pts, 3, 3,
+//             &alpha,
+//             cudaX, n_data_pts,
+//             cudaModel, 3,
+//             &beta,
+//             cudaMul, n_data_pts
+//         );
+
+//         // double* mul = new double[3*n_data_pts];
+//         // cudaMemcpy(mul, cudaMul, sizeof(double) * n_data_pts * 3, cudaMemcpyDeviceToHost);
+//         // for (int i = 0; i < 9; i++){
+//         //     std::cout << mul[i] << std::endl;
+//         // }
+
+//         // std::cout << "here" << std::endl;
+
+//         threshold<<<4, 25>>>(cudaMul, cudaMask, cudaY, n_data_pts, tval);
+
+//         bool* temp_inlier_mask = new bool[n_data_pts];
+//         cudaMemcpy(temp_inlier_mask, cudaMask, sizeof(bool) * n_data_pts, cudaMemcpyDeviceToHost);
+
+//         // for (int i = 0; i < 27; i++){
+//         //     std::cout << temp_inlier_mask[i] << std::endl;
+//         // }
+
+//         // std::cout << "here" << std::endl;
+        
+//         int total_pts = 0;
+//         for(int i = 0; i<n_data_pts; i++){
+//             total_pts += temp_inlier_mask[i];
+//         }
+
+//         // std::cout << total_pts << std::endl;
+
+//         // std::cout << "here" << std::endl;
+
+//         if (total_pts >= n_valid_data_pts) {
+//             std::vector<double> src, dst;
+//             for(int i = 0; i < n_data_pts; i++){
+//                 inlier_mask[indices[i]] = inlier_mask[indices[i]] || temp_inlier_mask[i];
+//             }
+
+//             for(int j = 0; j < 3; j++){
+//                 for(int i = 0; i < N; i++){
+//                     if (inlier_mask[i]){
+//                         src.push_back(src_points[i+j*N]);
+//                         dst.push_back(dst_points[i+j*N]);
+//                     }
+//                 }
+//             }
+
+//             // for (int i = 0; i < 9; i ++) {
+//             //     std::cout<< src[i] << std::endl;
+//             //     std::cout << dst[i] << std::endl;
+//             // }
+
+//             int inlier_size = src.size() / 3;
+//             cudaMemcpy(cudaX, src.data(), sizeof(double) * src.size(), cudaMemcpyHostToDevice);
+//             cudaMemcpy(cudaY, dst.data(), sizeof(double) * src.size(), cudaMemcpyHostToDevice);
+
+//             cublasDgemm(
+//                 handle,
+//                 CUBLAS_OP_N, CUBLAS_OP_T,
+//                 inlier_size, 3, 3,
+//                 &alpha,
+//                 cudaX, inlier_size,
+//                 cudaModel, 3,
+//                 &beta,
+//                 cudaMul, inlier_size
+//             );
+            
+//             // double* ml = new double[N*3];
+//             // cudaMemcpy(ml, cudaMul, sizeof(double) * src.size(), cudaMemcpyDeviceToHost);
+//             //cudaMemcpy(cudaMul,ml,sizeof(double) * src.size(),cudaMemcpyHostToDevice);
+//             // for (int i = inlier_size; i < inlier_size + 9; i++){
+//             //     std::cout << ml[i] << std::endl;
+//             //     //std::cout << dst[i] << std::endl;
+//             // }
+            
+//             //std::cout << "here" << std::endl;
+
+//             calc_error<<<1, 1000>>>(cudaMul, cudaError, cudaY, inlier_size);
+
+//             double *err = new double[1];
+//             cudaMemcpy(err, cudaError, sizeof(double), cudaMemcpyDeviceToHost);
+    
+//             double s = 0;
+//             *err = *err / inlier_size;
+
+//             // for (int i = 0; i < 9; i ++){
+
+//             //     //if (abs(err[i] - pydat[i]) > 0.00005){
+//             //         //std::cout << "miss: " << i << std::endl;
+//             //         std::cout << err[i] << std::endl;
+
+//             //         //std::cout << ml[inlier_size * 2 + i] << std::endl;
+//             //         //std::cout << pydat[i] << std::endl;
+//             //     //}
+//             //     //s += err[i];
+//             // }
+//             // std::cout << "here" << std::endl;
+//             // std::cout << *err << std::endl;
+//             if (*err < best_error){
+//                 best_error = *err;
+//                 best_inlier_mask = inlier_mask;
+//             }
+//         }
+//         //invoke threshold check kernel
+//     }
+
+//     cudaFree(cudaModel);
+//     cudaFree(cudaResult);
+//     cudaFree(cudaMul);
+//     cudaFree(cudaX);
+//     cudaFree(cudaY);
+//     cudaFree(cudaMask);
+//     cudaFree(cudaError);
+// }
+
+void* ransac_fit(
+    void* arg
 ){
+
+    thread_data *tdata=(thread_data *)arg;
+    int loopIndex = tdata->i;
+    double* src_points = tdata->src_points;
+    double* dst_points = tdata->dst_points;
+    double* cudaMul = tdata->cudaMul + loopIndex * DATA_SIZE;
+    double* cudaX = tdata->cudaX + loopIndex * DATA_SIZE;
+    double* cudaY = tdata->cudaY + loopIndex * DATA_SIZE;
+    bool* cudaMask = tdata->cudaMask + loopIndex * DATA_SIZE/3;
+    double* cudaError = tdata->cudaError+loopIndex;
+    double* cudaModel = tdata->cudaModel;
+
+    int N = tdata->N;
+    int k = tdata->k;
+    double tval = tdata->tval;
+    std::vector<bool>& best_inlier_mask = tdata->best_mask;
+    double& best_error = tdata->best_error;
+
     const int n_data_pts = 100, n_valid_data_pts = 80;
-    std::vector<double> ones(N, 1);
-
-    // send data to gpu
-    double* cudaMul;
-    double* cudaModel;
-    double* cudaX;
-    double* cudaY;
-    double* cudaResult;
-    double* cudaError;
-    bool* cudaMask;
-
-    cudaMalloc(&cudaModel, sizeof(double) * 9);
-    cudaMalloc(&cudaResult, sizeof(double) * N * 3);
-    cudaMalloc(&cudaMul, sizeof(double) * N * 3);
-    cudaMalloc(&cudaX, sizeof(double) * N * 3);
-    cudaMalloc(&cudaY, sizeof(double) * N * 3);
-    cudaMalloc(&cudaMask, sizeof(bool) * N);
-    cudaMalloc(&cudaError, sizeof(double) * N * 3);
-
-    cudaMemcpy(cudaModel, M, sizeof(double) * 9, cudaMemcpyHostToDevice);
 
     std::vector<bool> inlier_mask(N, false);
     best_error = 1000000;
-    //std::vector<bool> best_inlier_mask;
 
     cublasHandle_t handle = 0;
     cublasCreate(&handle);
 
+    int start = loopIndex * (k / NUM_THREADS);
+    int end = (loopIndex == NUM_THREADS - 1) ? k : (loopIndex + 1) * (k / NUM_THREADS);
+
     //coarse grain parallelize this
-    for (int i = 0; i < k; i++){
+    for (int i = start; i < end; i++){
 
         // sample src points
         std::vector<unsigned int> indices(N);
@@ -147,17 +366,6 @@ void ransac_fit(
         std::random_device rd;
         std::mt19937 g(rd());
         std::shuffle(indices.begin(), indices.end(), g);
-
-        // indices = {1126,  960,  191,  588,  164,  939,  443,   57,  242,   64,   61,
-        // 698,  185,  149,  442,    7,  390,  943, 1128, 1025,  864,  346,
-        // 929,  705,  771, 1031,  944,  879,   52,  116,  827,  375,  379,
-        // 782,  834,  146,  493,  795,  272,  123,  707,  427,  545, 1036,
-        // 320,  152,  196,   80,  211,  665,  296,  975,  148,  486,  174,
-        // 495,  810,  524,  546,   56,  784, 1108,  595,  201,  184,  585,
-        // 854,  959,  227,  531,   70, 1130,  663,  985,  971,  586,  373,
-        // 161,  783,  692,  741,  186,  421,  607,  883,  312, 1062,  690,
-        // 257,  681,  979,  899,  989,   92,  279,  353,  452, 1066, 1043,
-        // 54};
 
         // Set the X and y according to randomly sampled indices
         double* sampledX = new double[n_data_pts*3];
@@ -294,13 +502,7 @@ void ransac_fit(
         //invoke threshold check kernel
     }
 
-    cudaFree(cudaModel);
-    cudaFree(cudaResult);
-    cudaFree(cudaMul);
-    cudaFree(cudaX);
-    cudaFree(cudaY);
-    cudaFree(cudaMask);
-    cudaFree(cudaError);
+    pthread_exit(NULL);
 }
 
 void writeArrayToCSV(const std::vector<bool>& array, const std::string& filename) {
@@ -322,7 +524,13 @@ void writeArrayToCSV(const std::vector<bool>& array, const std::string& filename
 }
 
 int main()
-{
+{   
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+
+
     float reproj_thresh = 10.0;
     double M[9]= { 5.98693576e-01, -1.36867155e-01, -3.34456444e-04, 1.69989140e-02,  8.76117794e-01, -8.39683573e-06, 514.0186034790541, 41.416968762719435, 1.0};
     Points *pts = readPtsFile("./data/src_dst_pts.bin");
@@ -331,6 +539,7 @@ int main()
     std::vector<double> src, dst;
     const int max_iter = 10000, N = 1132;
     
+
     for(int n = 0; n < 3; n++){
         for (int i = 0 ; i < N; i++){
             if (n != 2) {
@@ -349,15 +558,85 @@ int main()
         }
     }
 
+    // send data to gpu
+    double* cudaMul;
+    double* cudaModel;
+    double* cudaX;
+    double* cudaY;
+    double* cudaError;
+    bool* cudaMask;
+
+    cudaMalloc(&cudaModel, sizeof(double) * 9);
+    cudaMalloc(&cudaMul, sizeof(double) * N * 3 * NUM_THREADS);
+    cudaMalloc(&cudaX, sizeof(double) * N * 3 * NUM_THREADS);
+    cudaMalloc(&cudaY, sizeof(double) * N * 3 * NUM_THREADS);
+    cudaMalloc(&cudaMask, sizeof(bool) * N * NUM_THREADS);
+    cudaMalloc(&cudaError, sizeof(double) * N);
+
+    cudaMemcpy(cudaModel, M, sizeof(double) * 9, cudaMemcpyHostToDevice);
     std::vector<bool> best_inlier_mask;
     double best_error = 1000000;
-    ransac_fit(src.data(), dst.data(), M , N, max_iter, 10.0, best_inlier_mask, best_error);
+    
+    // Create an array of thread objects
+    pthread_t threads[NUM_THREADS];
+
+    // Create an array of loop indices
+    thread_data data[NUM_THREADS];
+
+    // Create threads and assign loop indices
+    for (int i = 0; i < NUM_THREADS; i++) {
+        data[i].src_points = src.data();
+        data[i].dst_points = dst.data();
+        data[i].cudaMul = cudaMul;
+        data[i].cudaModel = cudaModel;
+        data[i].cudaX = cudaX;
+        data[i].cudaY = cudaY;
+        data[i].cudaError = cudaError;
+        data[i].cudaMask = cudaMask;
+        data[i].N = N;
+        data[i].k = max_iter;
+        data[i].tval = reproj_thresh;
+        data[i].i = i;
+        data[i].best_error = best_error;
+    }
+
+    
+
+
+    auto t1 = high_resolution_clock::now();
+    for (int i = 0; i < NUM_THREADS; i++) {
+        pthread_create(&threads[i], NULL, ransac_fit, &data[i]);
+    }
+    
+    for (int i = 0; i < NUM_THREADS; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    auto t2 = high_resolution_clock::now();
+
+    int best_idx = 0;
+    for (int i = 0; i < NUM_THREADS; i++){
+        if (best_error > data[i].best_error){
+            best_idx = i;
+            best_error = data[i].best_error;
+        }
+    }
+    // ransac_fit(src.data(), dst.data(), M , N, max_iter, reproj_thresh, best_inlier_mask, best_error);
+    cudaFree(cudaModel);
+    cudaFree(cudaMul);
+    cudaFree(cudaX);
+    cudaFree(cudaY);
+    cudaFree(cudaMask);
+    cudaFree(cudaError);
+
+    auto ms_int = duration_cast<milliseconds>(t2 - t1);
+    duration<double, std::milli> ms_double = t2 - t1;
 
     std::cout <<"best error: " << best_error << std::endl;
     std::cout <<"best mask:" <<std::endl;
 
+    std::cout << ms_int.count() << "ms\n";
+    std::cout << ms_double.count() << "ms\n";
+    return 0;
     std::string filename = "new.csv";
-    writeArrayToCSV(best_inlier_mask, filename);
-
-
+    writeArrayToCSV(data[best_idx].best_mask, filename);
 }
