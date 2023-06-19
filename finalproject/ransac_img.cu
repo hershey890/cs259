@@ -101,8 +101,11 @@ __global__ void calc_error(
     double* dst_pts,
     const int N
 ){
-    __shared__ double errs[1132 * 3];
+    __shared__ double errs[283 * 3];
+    int curt = threadIdx.x;
+    int bldim = blockDim.x;
     int thread = blockDim.x * blockIdx.x + threadIdx.x;
+    int bl = blockIdx.x;
     if (thread < N) {
         
         double norm = temp[2 * N + thread];
@@ -113,17 +116,17 @@ __global__ void calc_error(
             
         val1 *= val1; val2 *= val2; val3 *= val3;
 
-        errs[thread] = val1;
-        errs[1 * N + thread] = val2;
-        errs[2 * N + thread] = val3;
+        errs[curt] = val1;
+        errs[1 * bldim + curt] = val2;
+        errs[2 * bldim + curt] = val3;
 
         __syncthreads();
-        if (thread == 0){
+        if (curt == 0){
             double sum = 0;
-            for (int i = 0; i<N*3; i ++){
+            for (int i = 0 ; i<283*3; i++){
                 sum += errs[i];
             }
-            *error = sum;
+            error[bl] = sum; 
         }
     }
 
@@ -143,7 +146,7 @@ void* ransac_fit(
     double* cudaX = tdata->cudaX + loopIndex * DATA_SIZE;
     double* cudaY = tdata->cudaY + loopIndex * DATA_SIZE;
     bool* cudaMask = tdata->cudaMask + loopIndex * DATA_SIZE/3;
-    double* cudaError = tdata->cudaError+loopIndex;
+    double* cudaError = tdata->cudaError+loopIndex * 4;
     double* cudaModel = tdata->cudaModel;
     cublasHandle_t handle = tdata->handle;
     std::vector<unsigned int>& indices = *(tdata->indices);
@@ -276,13 +279,17 @@ void* ransac_fit(
             
             //std::cout << "here" << std::endl;
 
-            calc_error<<<1, 1000>>>(cudaMul, cudaError, cudaY, inlier_size);
+            calc_error<<<4, 283>>>(cudaMul, cudaError, cudaY, inlier_size);
 
             // double *err = new double[1];
-            double err;
-            cudaMemcpy(&err, cudaError, sizeof(double), cudaMemcpyDeviceToHost);
+            double errors[4];
+            cudaMemcpy(&errors, cudaError, sizeof(double) * 4, cudaMemcpyDeviceToHost);
     
             // *err = *err / inlier_size;
+            double err = 0;
+             for (int i = 0 ; i < 4; i++){
+                err += errors[i];
+            }
             err = err / inlier_size;
 
             // for (int i = 0; i < 9; i ++){
