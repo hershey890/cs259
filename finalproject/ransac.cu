@@ -3,6 +3,7 @@
 #include <boost/assert.hpp>
 #include <boost/bind/bind.hpp>
 #include <boost/iterator/permutation_iterator.hpp>
+#include <chrono>
 #include <cmath>
 #include <cublas_v2.h>
 #include <fstream>
@@ -12,7 +13,7 @@
 #include <random>
 
 #define LIN_REG_PARAMS_DIM 2
-#define THREAD_COUNT 6
+#define THREAD_COUNT 12
 
 struct RansacFitResult {
     double error;
@@ -366,13 +367,17 @@ int main() {
     };
 
     const int n = 10; // Minimum number of data points to estimate parameters
-    const int k = 100000; // Maximum number of iterations allowed
+    const int k = 10000; // Maximum number of iterations allowed
     const double t = 0.05; // Threshold value to determine if points are fit well
     const int d = 10; // Number of close data points required to assert model fits
     RansacFitResult bestFitResult;
+    const std::chrono::time_point<std::chrono::system_clock> startTime = std::chrono::system_clock::now();
     ransacFit(
         X, y, n, k, t, d, n_elements, &bestFitResult
     );
+    const std::chrono::time_point<std::chrono::system_clock> endTime = std::chrono::system_clock::now();
+    int64_t timeElapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime).count();
+    std::cout << "RANSAC 2D CUDA execution time in seconds: " << timeElapsedSeconds << '\n';
 
     std::cout << "Params: (" << bestFitResult.params[0] << ',' << bestFitResult.params[1] << ")\n";
     std::cout << "MSE: " << bestFitResult.error << '\n';
